@@ -4868,5 +4868,19 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
   })();
 
 </script>
+    <script>
+      // Sikkerhetsfiks 2026-07-03: fjerner offentlig nullstill-passord-funksjon.
+      // Tidligere viste siden standardpassord (marius@merkapital.no / Nora2026!) i klartekst
+      // og lot hvem som helst nullstille alle brukere uten innlogging. Se sikkerhetsgjennomgang.
+      (function() {
+        var msg = document.getElementById('glemt-passord-msg');
+        if (msg) {
+          msg.innerHTML = '<div style="font-weight:600;color:var(--text);margin-bottom:8px;">Glemt passord</div>Ta kontakt med Marius for aa faa nytt passord.';
+        }
+        window.tilbakestillBrukere = function() {
+          alert('Automatisk nullstilling er deaktivert av sikkerhetshensyn. Kontakt Marius.');
+        };
+      })();
+    </script>
 </body>
 </html>
