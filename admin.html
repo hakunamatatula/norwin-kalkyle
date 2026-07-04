@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v7"/>
+<meta name="app-version" content="admin-2026-07-04-v8"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -167,14 +167,14 @@
             <option value="">Alle fabrikker</option>
           </select></div>
           <div id="term-scope-rad" hidden><label>Gjelder</label><select id="term-scope" onchange="visOrdliste()">
-            <option value="global">Globalt (alle kunder)</option>
             <option value="kunde">Kun valgt kunde</option>
+            <option value="global">Globalt (alle kunder)</option>
           </select></div>
           <div><button class="btn" onclick="leggTilTerm()">+ Legg til</button></div>
         </div>
         <p class="hjelpetekst">Ordlisten legges automatisk inn i oversettelsen for hvert tilbud — alle selgere får identiske fagbegreper.</p>
       </div>
-      <div class="kort"><h3 style="margin-bottom:12px">Ordliste</h3><div id="term-liste"></div></div>
+      <div class="kort"><div id="term-liste"></div></div>
     </section>
     <section id="fane-logo" hidden>
       <div class="kort">
@@ -475,13 +475,21 @@ async function visOrdliste(){
   if(!$('term-fabrikk').options.length || $('term-fabrikk').options.length===1){
     $('term-fabrikk').innerHTML = '<option value="">Alle fabrikker</option>'+FABRIKKER.map(f=>'<option>'+f+'</option>').join('');
   }
-  $('term-liste').innerHTML = '<table><tr><th>Engelsk</th><th>Norsk</th><th>Fabrikk</th><th>Gjelder</th><th></th></tr>'+
-    termer.map(t=>{
-      const kanSlette = erNora || t.kunde_id;
-      return '<tr><td>'+esc(t.engelsk)+'</td><td><strong>'+esc(t.norsk)+'</strong></td><td>'+esc(t.fabrikk||'alle')+'</td>'+
-      '<td>'+(t.kunde_id?'denne kunden':'globalt')+'</td>'+
-      '<td>'+(kanSlette?'<button class="btn btn-ghost btn-liten" onclick="slettTerm('+t.id+')">Slett</button>':'')+'</td></tr>';
-    }).join('')+'</table>';
+  const kNavn = (kunder.find(k=>k.id===valgtKunde)||{}).navn || minKundeNavn || 'valgt kunde';
+  const tabell = (liste, kanSlette) => liste.length
+    ? '<table><tr><th>Engelsk</th><th>Norsk</th><th>Fabrikk</th><th></th></tr>'+
+      liste.map(t=>'<tr><td>'+esc(t.engelsk)+'</td><td><strong>'+esc(t.norsk)+'</strong></td><td>'+esc(t.fabrikk||'alle')+'</td>'+
+        '<td>'+(kanSlette?'<button class="btn btn-ghost btn-liten" onclick="slettTerm('+t.id+')">Slett</button>':'')+'</td></tr>').join('')+'</table>'
+    : '<p class="hjelpetekst">Ingen termer ennå.</p>';
+  const kundens = termer.filter(t=>t.kunde_id);
+  const globale = termer.filter(t=>!t.kunde_id);
+  $('term-liste').innerHTML =
+    '<h3 style="margin-bottom:8px">Kundens egen ordliste — '+esc(kNavn)+'</h3>'+
+    '<p class="hjelpetekst" style="margin-bottom:8px">Gjelder KUN denne kunden. Andre kunder kan ikke se disse.</p>'+
+    tabell(kundens, true)+
+    '<h3 style="margin:22px 0 8px">Global ordliste (Nora AI)</h3>'+
+    '<p class="hjelpetekst" style="margin-bottom:8px">Felles fagterminologi som gjelder alle kunder. Kun Nora AI-admin kan endre den.</p>'+
+    tabell(globale, erNora);
 }
 async function leggTilTerm(){
   const engelsk=$('term-en').value.trim(), norsk=$('term-no').value.trim(), fabrikk=$('term-fabrikk').value||null;

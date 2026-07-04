@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="2026-07-04-v38"/>
+<meta name="app-version" content="2026-07-04-v39"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
@@ -34,19 +34,19 @@
     --green:        #2D6A4F;
     --violet:       #C94A3A;
   }
-  body { background: var(--bg); color: var(--text); font-family: 'Plus Jakarta Sans', 'Helvetica Neue', Arial, sans-serif; font-size: 16px; line-height: 1.7; padding: 28px; }
-  .header { display:flex; justify-content:space-between; align-items:center; background:var(--bg2); border-bottom:1px solid var(--border); margin:-28px -28px 32px -28px; padding:16px 28px; box-shadow:0 1px 0 rgba(255,255,255,0.05); }
+  body { background: var(--bg); color: var(--text); font-family: 'Plus Jakarta Sans', 'Helvetica Neue', Arial, sans-serif; font-size: 15px; line-height: 1.55; padding: 16px; }
+  .header { display:flex; justify-content:space-between; align-items:center; background:var(--bg2); border-bottom:1px solid var(--border); margin:-16px -16px 18px -16px; padding:11px 20px; box-shadow:0 1px 0 rgba(255,255,255,0.05); }
   .logo-name { font-family:'Bricolage Grotesque',sans-serif; font-size:20px; color:var(--text); letter-spacing:0.01em; font-weight:700; }
   .logo-sub { font-size:11px; letter-spacing:0.14em; color:var(--muted); text-transform:uppercase; margin-top:3px; }
   .label { font-size:12px; letter-spacing:0.07em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; font-weight:600; }
-  .section-title { font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent); margin-bottom:16px; padding-bottom:8px; border-bottom:1px solid var(--border); font-weight:700; }
-  input, select { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:11px 14px; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; width:100%; outline:none; transition:border-color 0.2s; border-radius:6px; }
+  .section-title { font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent); margin-bottom:9px; padding-bottom:5px; border-bottom:1px solid var(--border); font-weight:700; }
+  input, select { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:8px 12px; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; width:100%; outline:none; transition:border-color 0.2s; border-radius:6px; }
   input:focus, select:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(111,231,212,0.12); }
   select option { background:var(--bg3); color:var(--text); }
-  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:28px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:14px; }
   .grid2-params { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  .field { margin-bottom:12px; }
-  .dropzone { border:1px dashed rgba(111,231,212,0.3); padding:30px; text-align:center; cursor:pointer; background:var(--bg3); transition:all 0.2s; margin-bottom:20px; border-radius:8px; }
+  .field { margin-bottom:9px; }
+  .dropzone { border:1px dashed rgba(232,96,79,0.35); padding:16px; text-align:center; cursor:pointer; background:var(--bg3); transition:all 0.2s; margin-bottom:12px; border-radius:8px; }
   .dropzone:hover, .dropzone.over { border-color:var(--accent); background:var(--accent-light); }
   .dropzone.has-file { border-color:var(--accent); border-style:solid; background:var(--accent-light); }
   .dropzone-icon { font-size:28px; margin-bottom:6px; color:var(--muted); }
@@ -128,8 +128,8 @@
   .step-title { font-size:16px; font-weight:700; letter-spacing:0.01em; margin-bottom:4px; color:var(--text); font-family:'Bricolage Grotesque',sans-serif; }
   .step-desc { font-size:14px; color:var(--muted); line-height:1.65; }
   /* Hurtigkalkulator */
-  .quick-calc { background:var(--bg2); border:1px solid var(--border); padding:24px 28px; margin-bottom:28px; border-radius:10px; box-shadow:0 2px 12px rgba(0,0,0,0.3); }
-  .quick-calc-title { font-size:13px; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent); margin-bottom:18px; padding-bottom:10px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; font-weight:700; font-family:'Bricolage Grotesque',sans-serif; }
+  .quick-calc { background:var(--bg2); border:1px solid var(--border); padding:14px 20px; margin-bottom:14px; border-radius:10px; box-shadow:0 2px 12px rgba(33,38,62,0.06); }
+  .quick-calc-title { font-size:13px; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent); margin-bottom:9px; padding-bottom:6px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; font-weight:700; font-family:'Bricolage Grotesque',sans-serif; }
   .quick-calc-title::before { content:'◈'; font-size:13px; color:var(--gold); }
   .quick-calc-grid { display:grid; grid-template-columns:1fr 1fr auto; gap:12px; align-items:end; }
   .quick-calc-grid input { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:10px 13px; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; width:100%; outline:none; transition:border-color 0.2s; border-radius:6px; }
@@ -689,24 +689,52 @@
     return JSON.parse(txt.slice(a, b + 1));
   }
 
-  /** Synker innlogget brukers kunde-logo fra databasen (per kunde, ikke per maskin). */
-  async function synkKundeLogo() {
+  /** Oppdaterer «Tilbudsverktøy — Kundenavn» i toppen. */
+  function oppdaterHeaderKunde() {
+    const headerNavn = document.getElementById('header-kunde-navn');
+    if (!headerNavn) return;
+    headerNavn.textContent = KUNDE_PROFIL.navn || '';
+    const sub = headerNavn.parentElement;
+    if (sub && sub.childNodes[0] && sub.childNodes[0].nodeType === 3) {
+      sub.childNodes[0].textContent = KUNDE_PROFIL.navn ? 'Tilbudsverktøy — ' : 'Tilbudsverktøy';
+    }
+  }
+
+  /** Synker kunde-kontekst fra databasen: firmanavn, logo og selgerregister
+   *  (kun brukere i innlogget brukers egen kunde — Nora AI-ansatte for nora_admin). */
+  async function synkKundeKontekst() {
     try {
       const token = await noraGyldigToken();
       if (!token) return;
       const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      const pr = await fetch(SB_URL + '/rest/v1/profiles?id=eq.' + payload.sub + '&select=kunde_id', {
-        headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token }
-      });
-      const kid = ((await pr.json())[0] || {}).kunde_id;
-      if (!kid) return; // Nora AI-ansatt uten kunde: behold standardlogo
-      const kr = await fetch(SB_URL + '/rest/v1/kunder?id=eq.' + kid + '&select=logo_url', {
-        headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token }
-      });
-      const logo = ((await kr.json())[0] || {}).logo_url;
-      if (logo) localStorage.setItem('norwin_kalk_logo', logo);
-      else localStorage.removeItem('norwin_kalk_logo');
-    } catch(e) { /* logo-synk er ikke kritisk */ }
+      const hdr = { apikey: SB_KEY, Authorization: 'Bearer ' + token };
+      const pr = await fetch(SB_URL + '/rest/v1/profiles?id=eq.' + payload.sub + '&select=kunde_id', { headers: hdr });
+      const kid = ((await pr.json())[0] || {}).kunde_id || null;
+
+      if (kid) {
+        const kr = await fetch(SB_URL + '/rest/v1/kunder?id=eq.' + kid + '&select=navn,logo_url', { headers: hdr });
+        const k = (await kr.json())[0] || {};
+        KUNDE_PROFIL.navn = k.navn || '';
+        if (k.logo_url) localStorage.setItem('norwin_kalk_logo', k.logo_url);
+        else localStorage.removeItem('norwin_kalk_logo');
+      } else {
+        KUNDE_PROFIL.navn = '';
+        localStorage.removeItem('norwin_kalk_logo');
+      }
+      oppdaterHeaderKunde();
+
+      const filter = kid ? 'kunde_id=eq.' + kid : 'kunde_id=is.null';
+      const sr = await fetch(SB_URL + '/rest/v1/profiles?' + filter + '&aktiv=eq.true&select=fornavn,etternavn,epost,mobil&order=fornavn', { headers: hdr });
+      const rader = await sr.json();
+      if (Array.isArray(rader)) {
+        SELGERE = {};
+        rader.forEach(p => {
+          const fulltNavn = ((p.fornavn || '') + ' ' + (p.etternavn || '')).trim() || p.epost;
+          const key = (p.fornavn && !SELGERE[p.fornavn]) ? p.fornavn : fulltNavn;
+          SELGERE[key] = { fornavn: p.fornavn || fulltNavn, navn: fulltNavn, mob: p.mobil || '', epost: p.epost };
+        });
+      }
+    } catch(e) { /* kontekst-synk er ikke kritisk */ }
   }
 
   /** Deterministisk prising: nok/sum/totaler beregnes ALLTID i klienten, aldri av modellen. */
@@ -986,13 +1014,8 @@ ${klon.outerHTML}
     resultDiv.style.display = 'grid';
   }
 
-  const SELGERE = {
-    'Bente':  { fornavn:'Bente',  navn:'Bente Jul-Larsen',        mob:'98653255',  epost:'bente@norwin.no'},
-    'Grete':  { fornavn:'Grete',  navn:'Grete Holt',              mob:'47910660',  epost:'grete@norwin.no'},
-    'Marius': { fornavn:'Marius', navn:'Marius Nielsen Matatula', mob:'48355995',  epost:'marius@norwin.no'},
-    'Per':    { fornavn:'Per',    navn:'Per Schiøtz',             mob:'90583823',  epost:'per@norwin.no'},
-    'Tom':    { fornavn:'Tom',    navn:'Tom Ektvedt',             mob:'98826002',  epost:'tom@norwin.no'},
-  };
+  // Selgerregister fylles fra databasen ved innlogging (kun brukere i egen kunde).
+  let SELGERE = {};
 
   function filterSelger(val, showAll) {
     const dd = document.getElementById('selger-dropdown');
@@ -1162,14 +1185,14 @@ ${klon.outerHTML}
   // Tilpass disse verdiene per kunde/deployment (én versjon per bedrift).
   // Skjuler konfigurasjonen mellom kunder — kun aktuelle fabrikker og selgere vises.
   const KUNDE_PROFIL = {
-    navn:      'Norwin AS',                                       // Kundens firmanavn
+    navn:      '',                                                // Settes fra databasen ved innlogging
     fabrikker: ['hctc', 'vitron', 'aradas', 'aldens', 'aliuminatas'], // Fabrikker denne kunden bruker
   };
 
   // Versjonsstyrt cache-rydding: rydder gammel rate-cache når app-versjon endres.
   // Forhindrer at nettleseren viser gammel fallback-kurs (11.20) etter kodeoppdatering.
   // Viktig: oppdater APP_VERSION ved hver ny deployment (f.eks. '2026-05-21-v1').
-  const APP_VERSION = '2026-07-01-v31';
+  const APP_VERSION = '2026-07-04-v39';
   try {
     if (localStorage.getItem('merkapital_app_version') !== APP_VERSION) {
       localStorage.removeItem(RATE_CACHE_KEY);
@@ -3491,9 +3514,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
   // Init ved DOMContentLoaded
   document.addEventListener('DOMContentLoaded', () => {
-    // ── Vis kundenavn (fra KUNDE_PROFIL) i header ──
-    const headerNavn = document.getElementById('header-kunde-navn');
-    if (headerNavn) headerNavn.textContent = KUNDE_PROFIL.navn;
+    oppdaterHeaderKunde();
 
     // Koble valutakurs-input til hint-oppdatering
     document.getElementById('valutakurs').addEventListener('input', oppdaterAradasHint);
@@ -4839,7 +4860,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     const innloggetEl = document.getElementById('innlogget-info');
     if (innloggetEl) innloggetEl.textContent = `${NORA_SESJON.epost} (${NORA_SESJON.rolle})`;
 
-    await synkKundeLogo();
+    await synkKundeKontekst();
     oppdaterLogoPreview();
   }
 
@@ -4922,7 +4943,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       oppdaterAdminKnapp(NORA_SESJON.rolle || 'bruker');
       const innloggetEl = document.getElementById('innlogget-info');
       if (innloggetEl) innloggetEl.textContent = `${NORA_SESJON.epost} (${NORA_SESJON.rolle || 'bruker'})`;
-      await synkKundeLogo();
+      await synkKundeKontekst();
       oppdaterLogoPreview();
       return;
     }
