@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v1"/>
+<meta name="app-version" content="admin-2026-07-04-v2"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -231,7 +231,7 @@ async function glemtPassord(){
   const epost = $('inn-epost').value.trim();
   if(!epost) return meld('inn-melding','Skriv inn e-posten din først','feil');
   try{
-    await auth('/recover', {email:epost, gotrue_meta_security:{}}, null);
+    await auth('/recover?redirect_to='+encodeURIComponent(location.origin+location.pathname), {email:epost, gotrue_meta_security:{}}, null);
     meld('inn-melding','E-post med tilbakestillingslenke er sendt.');
   }catch(e){ meld('inn-melding',e.message,'feil'); }
 }
