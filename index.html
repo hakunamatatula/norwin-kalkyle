@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="2026-07-04-v37"/>
+<meta name="app-version" content="2026-07-04-v38"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
@@ -687,6 +687,26 @@
     const a = txt.indexOf('{'), b = txt.lastIndexOf('}');
     if (a < 0 || b <= a) throw new Error('Uventet svar fra Claude');
     return JSON.parse(txt.slice(a, b + 1));
+  }
+
+  /** Synker innlogget brukers kunde-logo fra databasen (per kunde, ikke per maskin). */
+  async function synkKundeLogo() {
+    try {
+      const token = await noraGyldigToken();
+      if (!token) return;
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const pr = await fetch(SB_URL + '/rest/v1/profiles?id=eq.' + payload.sub + '&select=kunde_id', {
+        headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token }
+      });
+      const kid = ((await pr.json())[0] || {}).kunde_id;
+      if (!kid) return; // Nora AI-ansatt uten kunde: behold standardlogo
+      const kr = await fetch(SB_URL + '/rest/v1/kunder?id=eq.' + kid + '&select=logo_url', {
+        headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token }
+      });
+      const logo = ((await kr.json())[0] || {}).logo_url;
+      if (logo) localStorage.setItem('norwin_kalk_logo', logo);
+      else localStorage.removeItem('norwin_kalk_logo');
+    } catch(e) { /* logo-synk er ikke kritisk */ }
   }
 
   /** Deterministisk prising: nok/sum/totaler beregnes ALLTID i klienten, aldri av modellen. */
@@ -4819,6 +4839,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     const innloggetEl = document.getElementById('innlogget-info');
     if (innloggetEl) innloggetEl.textContent = `${NORA_SESJON.epost} (${NORA_SESJON.rolle})`;
 
+    await synkKundeLogo();
     oppdaterLogoPreview();
   }
 
@@ -4901,6 +4922,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       oppdaterAdminKnapp(NORA_SESJON.rolle || 'bruker');
       const innloggetEl = document.getElementById('innlogget-info');
       if (innloggetEl) innloggetEl.textContent = `${NORA_SESJON.epost} (${NORA_SESJON.rolle || 'bruker'})`;
+      await synkKundeLogo();
       oppdaterLogoPreview();
       return;
     }

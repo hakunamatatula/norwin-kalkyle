@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v5"/>
+<meta name="app-version" content="admin-2026-07-04-v6"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -93,21 +93,39 @@
   <nav class="faner" id="faner"></nav>
   <main>
     <div class="verktoylinje" id="kundevelger-rad" hidden>
-      <div><label>Kunde</label><select id="kundevelger" onchange="byttKunde()"></select></div>
+      <div><label>Du administrerer nå</label><select id="kundevelger" onchange="byttKunde()"></select></div>
     </div>
+    <div id="kontekst-linje" class="hjelpetekst" style="margin:-6px 0 14px 0" hidden></div>
     <div id="app-melding" class="melding"></div>
     <section id="fane-kunder" hidden>
       <div class="kort">
-        <h3 style="margin-bottom:12px">Ny kunde</h3>
-        <div class="grid3" style="align-items:end">
+        <h3 style="margin-bottom:4px">Opprett ny kunde</h3>
+        <p class="hjelpetekst" style="margin-bottom:14px">Alt i én flyt: selskap, fabrikker, innstillinger, logo og kundens egen administrator. Kun selskapsnavn er påkrevd — resten kan settes senere.</p>
+        <div class="grid3">
           <div><label>Selskapsnavn *</label><input id="ny-kunde-navn"></div>
           <div><label>Org.nr</label><input id="ny-kunde-orgnr"></div>
-          <div><button class="btn" onclick="opprettKunde()">+ Opprett kunde</button></div>
         </div>
         <div style="margin-top:12px"><label>Fabrikker kunden bruker (velges eksplisitt — ingen arves)</label>
           <div id="ny-kunde-fabrikker" style="display:flex;gap:14px;flex-wrap:wrap;padding:6px 0"></div>
         </div>
-        <p class="hjelpetekst">Standardinnstillinger (30 % dekning, min 20/maks 50) opprettes automatisk. Fabrikker og all annen kundedata er isolert per kunde.</p>
+        <div style="margin-top:12px"><label>Innstillinger (dekning %)</label>
+          <div class="grid3">
+            <div><label style="font-weight:400">Standard</label><input id="nyk-dekning" type="number" step="0.1" value="30"></div>
+            <div><label style="font-weight:400">Min</label><input id="nyk-min" type="number" step="0.1" value="20"></div>
+            <div><label style="font-weight:400">Maks</label><input id="nyk-maks" type="number" step="0.1" value="50"></div>
+          </div>
+        </div>
+        <div style="margin-top:12px"><label>Logo i kundetilbud (valgfri — SVG/PNG, maks 200×60 px)</label>
+          <input type="file" id="nyk-logo" accept=".svg,.png,.jpg,.jpeg">
+        </div>
+        <div style="margin-top:12px"><label>Inviter kundens administrator (valgfri — får e-post og setter passord selv)</label>
+          <div class="grid3">
+            <div><input id="nyk-adm-fornavn" placeholder="Fornavn"></div>
+            <div><input id="nyk-adm-etternavn" placeholder="Etternavn"></div>
+            <div><input id="nyk-adm-epost" type="email" placeholder="E-post"></div>
+          </div>
+        </div>
+        <div style="margin-top:16px"><button class="btn" onclick="opprettKunde()">+ Opprett kunde</button></div>
       </div>
       <div class="kort"><h3 style="margin-bottom:12px">Kunder</h3><div id="kunde-liste"></div></div>
     </section>
@@ -164,7 +182,7 @@
     <section id="fane-logo" hidden>
       <div class="kort">
         <h3 style="margin-bottom:12px">Logo i kundetilbud</h3>
-        <p class="hjelpetekst" style="margin-bottom:14px">Logoen vises øverst i genererte kundetilbud. SVG/PNG, maks 200×60 px. NB: Lagres foreløpig per maskin/nettleser. Sentral lagring per kunde kommer i en senere fase.</p>
+        <p class="hjelpetekst" style="margin-bottom:14px">Logoen vises øverst i genererte kundetilbud. SVG/PNG, maks 200×60 px. Lagres sentralt for den valgte kunden — hver kunde har sin egen logo, og den følger kundens selgere uansett maskin.</p>
         <input type="file" id="logo-fil" accept=".svg,.png,.jpg,.jpeg" style="position:absolute;width:1px;height:1px;opacity:0" onchange="lastOppLogo(this)">
         <div id="logo-preview" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:8px;padding:18px;text-align:center;min-height:64px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
           <span class="hjelpetekst">Ingen egendefinert logo — standardlogo brukes</span>
@@ -191,7 +209,7 @@ const SB_URL = 'https://nykvylfvouwmoclraxqu.supabase.co';
 const SB_KEY = 'sb_publishable_x-8Q-9gRRnw144STE1QCwA_zHfrE9_P';
 const LAGER = 'nora_sesjon'; // delt med kalkulatoren (index.html) — én innlogging gjelder begge
 
-let sesjon = null, minProfil = null, valgtKunde = null, kunder = [], loggData = [], redigererFabrikkerFor = null;
+let sesjon = null, minProfil = null, valgtKunde = null, kunder = [], loggData = [], redigererFabrikkerFor = null, minKundeNavn = '';
 const FABRIKKER = ['HCTC','Aldens','Aliuminatas','Vitron','Aradas'];
 function fabrikkBokser(klasse, valgte){
   return FABRIKKER.map(f =>
@@ -302,10 +320,13 @@ async function startApp(){
   if(erNora){
     const rolleSelect = $('ny-rolle');
     rolleSelect.insertAdjacentHTML('beforeend','<option value="nora_admin">Nora AI-admin (ansatt hos Nora AI)</option>');
-    $('kundevelger-rad').hidden = false;
     await lastKunder();
   } else {
     valgtKunde = minProfil.kunde_id;
+    try{
+      const kd = await api('/rest/v1/kunder?id=eq.'+valgtKunde+'&select=navn');
+      minKundeNavn = (kd && kd[0] && kd[0].navn) || '';
+    }catch(e){}
   }
   byttFane(erNora?'kunder':'brukere');
 }
@@ -328,6 +349,13 @@ function byttFane(id){
     if(s) s.hidden = f!==id;
     if(b) b.classList.toggle('aktiv', f===id);
   });
+  // Kontekst: kundevelger vises kun for Nora-admin på kunde-scopede faner
+  const erNora = minProfil && minProfil.rolle==='nora_admin';
+  const scopet = id!=='kunder';
+  $('kundevelger-rad').hidden = !(erNora && scopet);
+  const kNavn = (kunder.find(k=>k.id===valgtKunde)||{}).navn || minKundeNavn || '';
+  $('kontekst-linje').hidden = !(scopet && kNavn);
+  $('kontekst-linje').innerHTML = scopet && kNavn ? 'Fanen gjelder kunden: <strong style="color:var(--text)">'+esc(kNavn)+'</strong>' : '';
   oppdaterAktivFane();
 }
 function oppdaterAktivFane(){
@@ -348,7 +376,8 @@ async function visKunder(){
           '<button class="btn btn-ghost btn-liten" onclick="redigererFabrikkerFor=\''+k.id+'\';visKunder()">Endre</button>';
       return '<tr><td><strong>'+esc(k.navn)+'</strong></td><td>'+esc(k.orgnr||'—')+'</td><td>'+fabCelle+'</td>'+
       '<td><span class="pill'+(k.aktiv?'':' inaktiv')+'">'+(k.aktiv?'aktiv':'deaktivert')+'</span></td>'+
-      '<td><button class="btn btn-ghost btn-liten" onclick="toggleKunde(\''+k.id+'\','+(!k.aktiv)+')">'+(k.aktiv?'Deaktiver':'Aktiver')+'</button></td></tr>';
+      '<td style="white-space:nowrap"><button class="btn btn-liten" onclick="administrerKunde(\''+k.id+'\')">Administrer →</button> '+
+      '<button class="btn btn-ghost btn-liten" onclick="toggleKunde(\''+k.id+'\','+(!k.aktiv)+')">'+(k.aktiv?'Deaktiver':'Aktiver')+'</button></td></tr>';
     }).join('')+'</table>';
 }
 async function lagreFabrikker(id){
@@ -359,17 +388,46 @@ async function lagreFabrikker(id){
     await visKunder();
   }catch(e){ meld('app-melding',e.message,'feil'); }
 }
+function lesFilSomDataUrl(input){
+  return new Promise((res)=>{
+    const fil = input && input.files && input.files[0];
+    if(!fil) return res(null);
+    const reader = new FileReader();
+    reader.onload = e => res(e.target.result);
+    reader.onerror = () => res(null);
+    reader.readAsDataURL(fil);
+  });
+}
 async function opprettKunde(){
   const navn=$('ny-kunde-navn').value.trim(), orgnr=$('ny-kunde-orgnr').value.trim();
   if(!navn) return meld('app-melding','Selskapsnavn er påkrevd','feil');
+  const admEpost=$('nyk-adm-epost').value.trim();
+  const admFornavn=$('nyk-adm-fornavn').value.trim(), admEtternavn=$('nyk-adm-etternavn').value.trim();
+  if(admEpost && (!admFornavn || !admEtternavn)) return meld('app-melding','Fyll inn både fornavn og etternavn på administratoren','feil');
+  const logo_data = await lesFilSomDataUrl($('nyk-logo'));
   try{
-    const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({action:'opprett_kunde', navn, orgnr:orgnr||null, fabrikker: lesFabrikkBokser('nyfab')})});
+    const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({
+      action:'opprett_kunde', navn, orgnr:orgnr||null,
+      fabrikker: lesFabrikkBokser('nyfab'),
+      dekning_prosent:+$('nyk-dekning').value||30, dekning_min:+$('nyk-min').value||20, dekning_maks:+$('nyk-maks').value||50,
+      logo_data,
+      admin_bruker: admEpost ? {epost:admEpost, fornavn:admFornavn, etternavn:admEtternavn} : null
+    })});
     if(r.error) throw new Error(r.error);
-    $('ny-kunde-navn').value=''; $('ny-kunde-orgnr').value='';
+    ['ny-kunde-navn','ny-kunde-orgnr','nyk-adm-fornavn','nyk-adm-etternavn','nyk-adm-epost'].forEach(i=>$(i).value='');
+    $('nyk-logo').value=''; $('nyk-dekning').value=30; $('nyk-min').value=20; $('nyk-maks').value=50;
     document.querySelectorAll('input.nyfab').forEach(i=>i.checked=false);
-    meld('app-melding','Kunden «'+navn+'» er opprettet med standardinnstillinger.');
-    valgtKunde = r.kunde.id; await visKunder();
+    valgtKunde = r.kunde.id;
+    await lastKunder();
+    $('kundevelger').value = valgtKunde;
+    meld('app-melding', r.advarsel || ('Kunden «'+navn+'» er opprettet'+(r.invitert?', og '+r.invitert+' er invitert som kunde-admin':'')+'.'), r.advarsel?'feil':'ok');
+    byttFane('brukere');
   }catch(e){ meld('app-melding',e.message,'feil'); }
+}
+function administrerKunde(id){
+  valgtKunde = id;
+  if($('kundevelger')) $('kundevelger').value = id;
+  byttFane('brukere');
 }
 async function toggleKunde(id, aktiv){
   try{ await api('/rest/v1/kunder?id=eq.'+id, {method:'PATCH', body:JSON.stringify({aktiv})}); await visKunder(); }
@@ -465,30 +523,34 @@ async function slettTerm(id){
   catch(e){ meld('app-melding',e.message,'feil'); }
 }
 
-// ── Logo i kundetilbud (delt localStorage med kalkulatoren) ──
-function visLogo(){
+// ── Logo i kundetilbud (lagres i databasen PER KUNDE — ikke delt på tvers) ──
+async function visLogo(){
   const el = $('logo-preview');
-  const lagret = localStorage.getItem('norwin_kalk_logo');
-  el.innerHTML = lagret
-    ? '<img src="'+lagret+'" alt="Logo" style="max-height:52px;max-width:100%;object-fit:contain">'
-    : '<span class="hjelpetekst">Ingen egendefinert logo — standardlogo brukes</span>';
+  try{
+    const kd = await api('/rest/v1/kunder?id=eq.'+valgtKunde+'&select=logo_url');
+    const logo = kd && kd[0] && kd[0].logo_url;
+    el.innerHTML = logo
+      ? '<img src="'+logo+'" alt="Logo" style="max-height:52px;max-width:100%;object-fit:contain">'
+      : '<span class="hjelpetekst">Ingen egendefinert logo — standardlogo brukes</span>';
+  }catch(e){ el.innerHTML = '<span class="hjelpetekst">Kunne ikke hente logo</span>'; }
 }
-function lastOppLogo(input){
-  const fil = input.files[0];
-  if(!fil) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    try { localStorage.setItem('norwin_kalk_logo', e.target.result); }
-    catch(err){ return meld('app-melding','Klarte ikke lagre logo (for stor fil?)','feil'); }
-    meld('app-melding','Logo lagret — brukes i nye kundetilbud.');
+async function lastOppLogo(input){
+  const logo_data = await lesFilSomDataUrl(input);
+  if(!logo_data) return;
+  try{
+    const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({action:'sett_logo', kunde_id:valgtKunde, logo_data})});
+    if(r.error) throw new Error(r.error);
+    meld('app-melding','Logo lagret for kunden — brukes i nye kundetilbud.');
     visLogo();
-  };
-  reader.readAsDataURL(fil);
+  }catch(e){ meld('app-melding',e.message,'feil'); }
 }
-function nullstillLogo(){
-  try { localStorage.removeItem('norwin_kalk_logo'); } catch(e){}
-  meld('app-melding','Logo tilbakestilt til standard.');
-  visLogo();
+async function nullstillLogo(){
+  try{
+    const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({action:'sett_logo', kunde_id:valgtKunde, logo_data:null})});
+    if(r.error) throw new Error(r.error);
+    meld('app-melding','Logo tilbakestilt til standard.');
+    visLogo();
+  }catch(e){ meld('app-melding',e.message,'feil'); }
 }
 
 // ── Endringslogg ──────────────────────────────────────────
