@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="2026-07-04-v35"/>
+<meta name="app-version" content="2026-07-04-v36"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
@@ -500,6 +500,10 @@
     </div>
 
     <div class="admin-section">
+      <a href="admin.html" style="display:block;background:var(--text);color:#FFF8F3;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:14px;">⚙ Åpne Nora AI Adminpanel — kunder, brukere, innstillinger, ordliste, endringslogg</a>
+    </div>
+
+    <div class="admin-section">
       <div class="admin-section-title">Logo i kundetilbud</div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:12px;">Last opp SVG/PNG (maks 200×60&nbsp;px).</div>
       <input type="file" id="logo-file-input" accept=".svg,.png,.jpg,.jpeg" style="position:absolute;width:1px;height:1px;opacity:0;" onchange="lastOppLogo(this)" />
@@ -674,7 +678,7 @@
   // brukersesjon. De gamle ?key=&ghtoken=&ghrepo=-parametrene er utfaset.
   const SB_URL = 'https://nykvylfvouwmoclraxqu.supabase.co';
   const SB_KEY = 'sb_publishable_x-8Q-9gRRnw144STE1QCwA_zHfrE9_P';
-  const NORA_SESS_KEY = 'nora_kalk_sesjon';
+  const NORA_SESS_KEY = 'nora_sesjon'; // delt med admin.html — én innlogging gjelder begge
 
   let NORA_SESJON = null; // {access_token, refresh_token, expires_at, epost, rolle}
 
@@ -4975,6 +4979,20 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     }
     const overlay = document.getElementById('login-overlay');
     const token = await noraGyldigToken();
+    // Sesjon opprettet i adminpanelet mangler epost/rolle — berik fra JWT + profiles
+    if (token && NORA_SESJON && !NORA_SESJON.epost) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        NORA_SESJON.epost = payload.email || '';
+        const pr = await fetch(SB_URL + '/rest/v1/profiles?id=eq.' + payload.sub + '&select=rolle,aktiv', {
+          headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token }
+        });
+        const prof = (await pr.json())[0];
+        const map = { nora_admin: 'admin', kunde_admin: 'kunde-admin', bruker: 'bruker' };
+        NORA_SESJON.rolle = prof ? (map[prof.rolle] || 'bruker') : 'bruker';
+        noraLagreSesjon();
+      } catch(e) {}
+    }
     if (token && NORA_SESJON && NORA_SESJON.epost) {
       if (overlay) { overlay.style.display = 'none'; overlay.classList.remove('show'); }
       oppdaterAdminKnapp(NORA_SESJON.rolle || 'bruker');
