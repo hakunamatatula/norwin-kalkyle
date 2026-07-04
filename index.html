@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="2026-05-26-v11"/>
+<meta name="app-version" content="2026-07-04-v32"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
@@ -485,14 +485,7 @@
     <div style="text-align:right;margin-bottom:8px;">
       <a href="#" onclick="glemtPassord();return false;" style="font-size:12px;color:var(--accent);text-decoration:none;opacity:0.8;">Glemt passord?</a>
     </div>
-    <div id="glemt-passord-msg" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;font-size:13px;color:var(--muted);line-height:1.7;">
-      <div style="font-weight:600;color:var(--text);margin-bottom:8px;">Tilbakestill innlogging</div>
-      Klikk knappen under for å nullstille alle brukere og logge inn med standard-passord:<br>
-      <span style="color:var(--text);font-family:monospace;font-size:12px;">marius@merkapital.no</span> &nbsp;/&nbsp; <span style="color:var(--text);font-family:monospace;font-size:12px;">Nora2026!</span><br>
-      <button onclick="tilbakestillBrukere()" style="margin-top:10px;background:var(--accent);color:#0a1628;border:none;border-radius:6px;padding:8px 18px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;letter-spacing:0.04em;">
-        ↺ &nbsp;Tilbakestill til standard-innlogging
-      </button>
-    </div>
+    <div id="glemt-passord-msg" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;font-size:13px;color:var(--muted);line-height:1.7;"></div>
     <div class="login-error" id="login-error"></div>
     <button class="btn" onclick="loggInn()">→ &nbsp;Logg inn</button>
   </div>
@@ -675,12 +668,125 @@
 
 
 <script>
-  const NORWIN_API_KEY = new URLSearchParams(window.location.search).get('key') || window.NORWIN_API_KEY || '';
+  // ── Nora AI v2: Supabase-backend ─────────────────────────────────────────
+  // API-nøkler sendes ALDRI til nettleseren. Claude-tolkning og GitHub-logging
+  // går via Supabase edge functions (claude-proxy / github-logg) med innlogget
+  // brukersesjon. De gamle ?key=&ghtoken=&ghrepo=-parametrene er utfaset.
+  const SB_URL = 'https://nykvylfvouwmoclraxqu.supabase.co';
+  const SB_KEY = 'sb_publishable_x-8Q-9gRRnw144STE1QCwA_zHfrE9_P';
+  const NORA_SESS_KEY = 'nora_kalk_sesjon';
 
-  // ── GitHub-lagring av endringslogg ──
-  // Token og repo hentes fra URL-parametere: ?key=API_KEY&ghtoken=TOKEN&ghrepo=eier/repo
-  const GITHUB_TOKEN = new URLSearchParams(window.location.search).get('ghtoken') || '';
-  const GITHUB_REPO  = new URLSearchParams(window.location.search).get('ghrepo') || 'hakunamatatula/mer-kapital-kalkyle';
+  let NORA_SESJON = null; // {access_token, refresh_token, expires_at, epost, rolle}
+
+  function noraLastSesjon() {
+    try { NORA_SESJON = JSON.parse(localStorage.getItem(NORA_SESS_KEY)); }
+    catch(e) { NORA_SESJON = null; }
+    return NORA_SESJON;
+  }
+  function noraLagreSesjon() {
+    try { localStorage.setItem(NORA_SESS_KEY, JSON.stringify(NORA_SESJON)); } catch(e) {}
+  }
+  /** Gyldig access token — fornyes automatisk. null hvis utlogget. */
+  async function noraGyldigToken() {
+    if (!NORA_SESJON) noraLastSesjon();
+    if (!NORA_SESJON || !NORA_SESJON.refresh_token) return null;
+    if (Date.now() / 1000 < (NORA_SESJON.expires_at || 0) - 60) return NORA_SESJON.access_token;
+    try {
+      const r = await fetch(SB_URL + '/auth/v1/token?grant_type=refresh_token', {
+        method: 'POST',
+        headers: { apikey: SB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: NORA_SESJON.refresh_token })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.msg || 'kunne ikke fornye sesjon');
+      NORA_SESJON.access_token  = d.access_token;
+      NORA_SESJON.refresh_token = d.refresh_token;
+      NORA_SESJON.expires_at    = Math.floor(Date.now() / 1000) + (d.expires_in || 3600);
+      noraLagreSesjon();
+      return NORA_SESJON.access_token;
+    } catch(e) { return null; }
+  }
+
+  /** Tolk fabrikk-PDF med Claude via claude-proxy (MASTERPROMPT v3.0 + delt ordliste fra admin). */
+  async function tolkMedClaude(pdfText, faktor) {
+    const token = await noraGyldigToken();
+    if (!token) throw new Error('Ikke innlogget');
+    const r = await fetch(SB_URL + '/functions/v1/claude-proxy', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, apikey: SB_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system: NORA_SYSTEMPROMPT,
+        messages: [{ role: 'user', content: 'Faktorpåslag: ' + (faktor > 0 ? faktor.toFixed(4) : '0') + '\n\n' + pdfText }],
+        max_tokens: 8000
+      })
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) {
+      const m = data.error ? (data.error.message || JSON.stringify(data.error)) : ('HTTP ' + r.status);
+      throw new Error('claude-proxy: ' + m);
+    }
+    const txt = (data.content && data.content[0] && data.content[0].text) || '';
+    const a = txt.indexOf('{'), b = txt.lastIndexOf('}');
+    if (a < 0 || b <= a) throw new Error('Uventet svar fra Claude');
+    return JSON.parse(txt.slice(a, b + 1));
+  }
+
+  /** Deterministisk prising: nok/sum/totaler beregnes ALLTID i klienten, aldri av modellen. */
+  function normaliserPriser(res, faktor) {
+    (res.p || []).forEach(p => {
+      p.eur = parseFloat(p.eur) || 0;
+      p.ant = parseInt(p.ant, 10) || 1;
+      p.nok = Math.round(faktor * p.eur * 100) / 100;
+      p.sum = Math.round(p.nok * p.ant * 100) / 100;
+    });
+    const main = (res.p || []).filter(p => !p.alt);
+    res.eksMva = Math.round(main.reduce((s, p) => s + p.sum, 0) * 100) / 100;
+    res.mva    = Math.round(res.eksMva * 0.25 * 100) / 100;
+    res.tot    = Math.round((res.eksMva + res.mva) * 100) / 100;
+  }
+
+  const NORA_SYSTEMPROMPT = `Du er en presis dokumenttolker for en norsk vindus- og dørgrossist. Du leser pristilbud fra utenlandske fabrikker (HCTC, Aldens, Aliuminatas, Vitron, Aradas m.fl.) og returnerer et nøyaktig strukturert JSON-objekt — ingenting annet. Ingen forklaringer, ingen kommentarer, ingen Markdown rundt JSON-en.
+
+PRINSIPP 1 — FULLSTENDIGHET (viktigst av alt):
+ALLE spesifikasjonsfelt som finnes for en posisjon i fabrikktilbudet skal med i "s"-arrayen — i samme rekkefølge som i kilden. Du skal ALDRI slå sammen, forkorte bort eller utelate felt. Et felt du ikke forstår tas med uendret heller enn å utelates. Kunden skal kunne sammenligne kundetilbudet linje for linje mot fabrikkens spesifikasjon.
+
+PRINSIPP 2 — OVERSETTELSE:
+All engelsk (og svensk) tekst oversettes til god norsk fagterminologi for vindus-/dørbransjen. Behold produktkoder, RAL-koder, modellnavn og mål uendret.
+
+PRINSIPP 3 — PRIS OG RABATT:
+- Faktorpåslaget sendes i brukermeldingen som "Faktorpåslag: X.XXXX" (0 betyr: beregnes av klienten etterpå)
+- NOK per stk. = faktorpåslag x EUR listepris (2 desimaler)
+- Fabrikkens rabattlinjer ("Rabatt, % 40%", "Total inkl. rabatt" osv.) skal ALDRI vises i kundetilbudet. Returner rabattprosenten kun i "r"-feltet (internt).
+- MVA = 25 %. eksMva/mva/tot beregnes kun av posisjoner der "alt" er false.
+
+OUTPUTFORMAT — ALLTID OG BARE DETTE:
+Svar KUN med kompakt JSON. Rotnivå:
+{"t":"<tilbudsnr>","d":"<dato ISO 8601>","r":<rabattprosent tall>,"kunde":"<kundenavn>","kontakt":"<kontaktperson>","kadr":"<kundeadresse>","mob":"<mobilnr uten +47>","epost":"<e-post>","prosjekt":"<prosjektnavn>","uv":<gj.sn. U-verdi tall, kun hvis oppgitt>,"vekt":<total vekt kg tall, kun hvis oppgitt>,"p":[<produkter>],"eksMva":<tall>,"mva":<tall>,"tot":<tall>}
+
+Hvert produkt i "p":
+{"n":<posisjonsnr>,"vnr":"<posisjonskode fra kilden hvis finnes, f.eks. V-1 eller ALU-2>","dim":"<f.eks. 790x490mm>","m2":<tall>,"ant":<tall>,"eur":<EUR listepris per stk.>,"nok":<faktor x eur>,"sum":<nok x ant>,"alt":<true/false>,"s":[{"l":"<feltnavn>","v":"<feltverdi>"},...]}
+
+Per posisjon skal "s" ALLTID avsluttes med disse hvis de finnes i kilden:
+{"l":"Vekt","v":"21 kg"} og {"l":"U-verdi (Uw)","v":"<= 1.06"}
+
+ALTERNATIVPOSISJONER: Posisjoner merket "Alternative position (not included in total...)" e.l. gir "alt":true. Beregn eur/nok/sum normalt, FULLSTENDIG "s"-array, utelates fra eksMva/mva/tot.
+
+FELTREKKEFØLGE HCTC IV-92/ALU-VINDUER (følg kilden):
+Type, Tresort, Malingfarge (slå sammen: "Inne: ... / Ute: ..."), Glass (full spesifikasjon inkl. U-verdi og avstandsskinner), Rammer/beslag (ALLE underlinjer i samme verdi: antall+type, fast karm, beslagstype, vrider/håndtak), Gjennomgående sprosse bredder, Træ/alu type, Pakninger, Glassforsegling, Not for foringer, Spor i underkant, Åpningsretning, Øvrig (frittstående noter som "Frostet glass"), Vekt, U-verdi (Uw).
+DØRER: Type, Tresort, Maling inne, Maling ute, Glass, Beslag, Hengsler, Håndtak, Låsesystem, Bunnglasslist, Pakninger, Glassforsegling, Terskel, Åpningsretning, Huller til montering, Øvrig.
+VINDUER (standard): Type, Tresort, Maling inne, Maling ute, Glass, Beslag, Hengsler, Brems, Håndtak, Sprosser, Sprosse bredde, Bunnglasslist, Pakninger, Glassforsegling, Spor i underkant, Åpningsretning, Nosis, Huller til montering, Øvrig.
+IV-78: Type, Tresort, Maling inne, Maling ute, Glass, Beslag, Håndtak, Ventilasjon, Bunnglasslist, Pakninger, Glassforsegling, Spor i underkant, Åpningsretning, Huller til montering, Øvrig.
+Andre fabrikker (Aldens/Aliuminatas/Vitron/Aradas): følg kildens egen feltrekkefølge og PRINSIPP 1 (Lock=Lås, Strike plate=Sluttstykke, Cylinder=Sylinder, Handle=Håndtak, Door closer=Dørlukker, Wire=Kabel, Cable entry=Kabelinngang, Magnet contact=Magnetkontakt, brannklasse EI60, lydklasse dB osv. — alle felt med).
+
+STANDARDOVERSETTELSER:
+Inside opening tilt-turn = Innadslående drei/kipp; TBT fittings - Tilt Before Turn = TBT beslag (drei/kipp); handle: special = Vrider: spesial; Fixed frame = Fast karm; white/vit = hvit; ljusgrå = lysegrå; (except group IV) = UTELATES ALLTID; Standard 5x10 venstre, topp, høyre = Standard 5x10mm; chrome plated = forkrommet; restrictor = barnesikring; hinges = hengsler; handle = håndtak; threshold = terskel; composite = kompositt; Fingerjoint = Fingerskjøtet; painted = malt; glazing = glassforsegling; frame = ramme; sash = karm; trickle vent = ventil; friction stay = friksjonsstay; espag = espagnolette-lås; lock = lås; cylinder = sylinder; silver = sølv; hooks = kroker; tilt = vipp; ventilation = ventilasjon; child protection = barnesikring; Sett fra insiden, slår in = Sett fra innsiden, slår inn.
+
+FRITEKST (HCTC-dører, samles i Øvrig): "VX 7729/160 hinges"="VX 7729/160 hengsler"; "With 1 point lock ASSA 562"="1 punkt lås ASSA 562"; "With cable in frame - frame prepared for SOLID 75"="Med kabel i karm - karm er klargjort for SOLID 75 (SOLID 75 + SOLID 731/20)"; "Without any lock"="Uten lås"; "Both sashes just with hinges (no locks and other fittings)"="Begge dørblad kun med hengsler (ingen lås eller beslag)"; "Without holes for handles and cylinders"="Forborede hull for håndtak og sylinder"; "Sashes will be packed separately"="Dørblad pakkes separat"; "Decorations: without"="Uten profilering"; "No warranty"=UTELATES; "Standard hinges"="Standard hengsler"; "Striking plate ASSA 1889-12"="Sluttstykke ASSA 1889-12"; "Both frame sides: 115x60mm"="Begge karmflanker: 115x60mm"; "With standard espagnolette"="Med standard espagnolette-lås"; "M5019 front door 3 point lock"="M5019 trepunkts inngangslås"; "Sprosses are not in line with pos.X"="Sprosser ikke i linje med pos. X"; "Will be connected to pos.X on site"="Kobles til pos. X på byggeplass"; "Sash is too small (Min size is 450x400mm)"="OBS: Karm under minstemål (min 450x400mm)"; "One radius arc" beholdes; "1pcs Adjufix in the top (center)" + "Huller till montage: MS14+ADJUFIX" = "MS14+ADJUFIX 4 på hver side og 1 i topp senter".
+
+ÅPNINGSRETNING: "Sett fra utsiden, slår ut"="Utadslående"; "Sett fra utsiden, slår inn"="Innadslående"; "Sett fra insiden, slår in"="Sett fra innsiden, slår inn".
+
+HENTING AV VERDIER: "t" fra "TILBUD Nr. XXXXXX" e.l.; "d" ISO 8601; "kunde"/"kontakt"/"kadr"/"mob"/"epost" er kjøperfeltene (IKKE fabrikken); "uv" fra "Gjennomsnittlig U-verdi for alle vinduer: X.XX"; "vekt" fra "Total vekt: XXXX kg".
+GENERELT: Hold verdiene korte og presise, men aldri på bekostning av PRINSIPP 1.`;
 
   async function lagreLoggTilGitHub(inkluderPriser) {
     if (endringslogg.length === 0) return; // ingen endringer å lagre
@@ -699,24 +805,18 @@
       endringer: endringslogg
     };
 
-    if (!GITHUB_TOKEN) return; // ikke konfigurert, hopp over stille
-
     try {
+      const token = await noraGyldigToken();
+      if (!token) return; // ikke innlogget — hopp over stille
       const innhold = btoa(unescape(encodeURIComponent(JSON.stringify(loggObjekt, null, 2))));
-      await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${filnavn}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `token ${GITHUB_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          message: `Endringslogg: ${prosjekt} (${selger})`,
-          content: innhold
-        })
+      await fetch(SB_URL + '/functions/v1/github-logg', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'apikey': SB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: filnavn, content_base64: innhold, message: `Endringslogg: ${prosjekt} (${selger})` })
       });
     } catch(e) {
       // Feil ved lagring — ignorer stille, blokkerer ikke utskrift
-      console.warn('Endringslogg ikke lagret til GitHub:', e);
+      console.warn('Endringslogg ikke lagret:', e);
     }
   }
 
@@ -1044,11 +1144,16 @@ ${klon.outerHTML}
   /** Auto-detekterer fabrikk basert på PDF-innhold. */
   function detekterFabrikk(txt) {
     const u = txt.toUpperCase();
-    if (u.includes('ALIUMINATAS'))  return 'aliuminatas';
-    if (u.includes('ALDENS'))       return 'aldens';
-    if (u.includes('ARADAS'))       return 'aradas';
+    // Aldens (m.fl.) har bokstav-spredt topptekst i pdf.js ("A L D E N S") —
+    // slaa sammen enkeltbokstaver adskilt med mellomrom foer soek, ellers
+    // faller deteksjonen feilaktig tilbake til HCTC (sett 2026-07-04).
+    const k = u.replace(/(?<=\b[A-Z0-9]) (?=[A-Z0-9]\b)/g, '');
+    const har = (ord) => u.includes(ord) || k.includes(ord);
+    if (har('ALIUMINATAS'))  return 'aliuminatas';
+    if (har('ALDENS'))       return 'aldens';
+    if (har('ARADAS'))       return 'aradas';
     // VITRON: polsk produsent, ALIPLAST GENESIS I+-system
-    if (u.includes('VITRON') || u.includes('ALIPLAST') || /POS\.\s*\d+\s+GENESIS/.test(u)) return 'vitron';
+    if (har('VITRON') || har('ALIPLAST') || /POS\.\s*\d+\s+GENESIS/.test(u)) return 'vitron';
     return 'hctc'; // Standard/fallback
   }
 
@@ -1642,7 +1747,7 @@ ${klon.outerHTML}
   // ── SYSTEMPROMPT v2.1 — se MASTERPROMPT.md for dokumentasjon og endringslogg ──
   const systemPrompt = `Du er en dokumenttolker for MER Kapital AS. Du returnerer KUN et gyldig JSON-objekt — ingen tekst før eller etter, ingen forklaringer, ingen Markdown-blokker. Første tegn i svaret ditt er "{" og siste tegn er "}".
 
-OVERSETTELSER (alltid norsk): chrome plated=forkrommet, restrictor=barnesikring, hinges=hengsler, handle=håndtak, threshold=terskel, composite=kompositt, Fingerjoint=Fingerskjøtet, white=hvit/hvite, painted=malt, glazing=glassforsegling, frame=ramme, sash=karm, trickle vent=ventil, friction stay=friksjonsstay, espag=espagnolette-lås, Friksjonsbrems=Friksjonsstay, lock=lås, cylinder=sylinder, silver=sølv, hooks=kroker, tilt=vipp, ventilation=ventilasjon, child protection=barnesikring.
+OVERSETTELSER (alltid norsk): chrome plated=forkrommet, restrictor=barnesikring, hinges=hengsler, handle=håndtak, threshold=terskel, composite=kompositt, Fingerjoint=Fingerskjøtet, white=hvit/hvite, painted=malt, glazing=glassforsegling, frame=ramme, sash=karm, trickle vent=ventil, friction stay=friksjonsstay, espag=espagnolette-lås, Friksjonsbrems=Friksjonsstay, lock=lås, cylinder=sylinder, silver=sølv, hooks=kroker, tilt=vipp, ventilation=ventilasjon, child protection=barnesikring, Inside opening tilt-turn=Innadslående drei/kipp, TBT fittings - Tilt Before Turn=TBT beslag (drei/kipp), special=spesial, ljusgrå=lysegrå. Svenske ord normaliseres alltid til norsk (ljusgrå=lysegrå, spröjs=sprosser).
 
 FRITEKST-OVERSETTELSER (bold/uthevet tekst etter spesifikasjonsfeltene i HCTC-dør-tilbud — samles i "Øvrig"):
 - "One radius arc" → "One radius arc"
@@ -1691,6 +1796,23 @@ FORENKLINGSREGLER FOR SPESIFIKASJONER (følg alltid):
 - Not for foringer: Legg alltid som eget felt "Not for foringer" direkte i s-arrayen (ikke i Øvrig).
 - Terskel/Dørterskel: Behold materiale og beskrivelse (f.eks. "Oljet eik" eller "Alu DAFA 68/62").
 - Vekt og Uw: Legg direkte i s-arrayen som egne felt "Vekt" og "Uw" (ikke i Øvrig).
+
+UNIVERSELL HOVEDREGEL — FULLSTENDIGHET (overstyrer alt annet ved tvil):
+- Gjengi HVER spesifikasjonslinje fra kildedokumentet som sitt EGET {"l","v"}-element i s-arrayen, i SAMME rekkefølge som i kilden. Ingen kildelinje skal utelates (unntak: "No warranty" og "(except group IV)" utelates alltid), og flere kildelinjer skal ALDRI slås sammen til ett felt.
+- Feltrekkefølgene under gjelder når dokumentet tydelig matcher produkttypen. For ALLE andre/nye formater: følg kildens egen feltstruktur og rekkefølge, med etikettene oversatt til norsk.
+- Kjenner du ikke igjen produkttypen, er det ALLTID riktigere å gjengi kildens felt 1:1 (oversatt) enn å presse dem inn i en kjent mal.
+
+IV-92 ALU VINDUER (og lignende træ/alu-formater) — følg kildens feltstruktur:
+- Type: hele produktnavnet, f.eks. "IV-92 ALU vinduer R4 (standard)"
+- Malingfarge: som i kilden, f.eks. "Inne: Hvit RAL 9010 / Ute: Hvit RAL 9010" (ett felt)
+- Rammer/beslag: antall og type kommaseparert, oversatt — f.eks. "2 x Innadslående drei/kipp, 1 x Fast karm, TBT beslag (drei/kipp)"
+- Vrider: eget felt — "handle: special GLOBE TBT, white RAL 9016" → "Spesial GLOBE TBT, hvit RAL 9016"
+- Træ/alu type: eget felt, utelat "(except group IV)" — f.eks. "IV ALU III gr. RALxxx"
+- Gjennomgående sprosse bredder: eget felt hvis finnes, f.eks. "90mm"
+- Not for foringer: "Standard 5x10 venstre, topp, høyre" → "Standard 5x10mm"
+- Åpningsretning: behold kildens formulering med korrekt norsk — "Sett fra insiden, slår in" → "Sett fra innsiden, slår inn"
+- Frostet glass: hvis glasskoden inneholder "Mat" (f.eks. 4Mat), legg til eget felt {"l":"Frostet glass","v":"Ja"} etter Glass
+- Vekt og Uw: alltid egne felt per posisjon, f.eks. "21 kg" og "<= 1.06"
 
 FELTREKKEFØLGE FOR DØRER (følg denne rekkefølgen i "s"-arrayen):
 Type, Tresort, Maling inne, Maling ute, Glass, Beslag, Hengsler, Håndtak, Låsesystem, Bunnglasslist, Pakninger, Glassforsegling, Terskel, Not for foringer, Åpningsretning, Huller til montering, Vekt, Uw, Øvrig
@@ -3186,8 +3308,42 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
       const JPEG_FABRIKKER = ['aradas', 'aldens', 'aliuminatas'];
 
-      if (JPEG_FABRIKKER.includes(FABRIKK)) {
-        // ── JPEG-FABRIKK-FLYT (Aradas / Aldens / Aliuminatas) ───────────────
+      // ── v2: Claude-tolkning via claude-proxy (MASTERPROMPT v3.0). Alle felt
+      //    med, oversatt, delt ordliste fra admin. Lokale parsere er fallback. ──
+      let claudeOk = false;
+      try {
+        const pdfTextC   = await extractPdfTextLayout(selectedFile);
+        const faktorInpC = parseNum(document.getElementById('faktor').value);
+        let resC = await tolkMedClaude(pdfTextC, faktorInpC);
+        if (selectedFile2) {
+          const pdfTextC2 = await extractPdfTextLayout(selectedFile2);
+          const resC2 = await tolkMedClaude(pdfTextC2, faktorInpC);
+          const numP1 = (resC.p || []).length;
+          (resC2.p || []).forEach((p, i) => { p.n = numP1 + i + 1; });
+          resC = { ...resC, p: [...(resC.p || []), ...(resC2.p || [])] };
+        }
+        const faktorC = faktorInpC > 0 ? faktorInpC
+          : (FABRIKK === 'hctc'
+              ? _r2((1 - ((resC.r != null ? resC.r : 35)) / 100) / 0.70 * valutakurs)
+              : _r2(valutakurs / 0.70));
+        normaliserPriser(resC, faktorC);
+        resFinal = resC;
+        window._faktorTilbud = faktorC;
+        claudeOk = true;
+        try {
+          let result;
+          if (FABRIKK === 'aldens')                  result = await extractAldensSketches(selectedFile);
+          else if (JPEG_FABRIKKER.includes(FABRIKK)) result = await extractPdfSkisserAradas(selectedFile);
+          else                                       result = await extractPdfSkisser(selectedFile);
+          if (result && result.skisser) { skisser = result.skisser; vnrMap = Object.assign({}, result.vnrMap || {}); }
+        } catch(e) { console.warn('Bilde-ekstraksjon feilet:', e); }
+      } catch(e) {
+        console.warn('Claude-tolkning utilgjengelig — bruker lokal parser:', e);
+      }
+
+
+      if (!claudeOk && JPEG_FABRIKKER.includes(FABRIKK)) {
+        // ── JPEG-FABRIKK-FLYT (fallback) (Aradas / Aldens / Aliuminatas) ───────────────
         const pdfText1  = await extractPdfTextLayout(selectedFile);
         const faktorInp = parseNum(document.getElementById('faktor').value);
 
@@ -3231,7 +3387,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
         window._faktorTilbud = faktorInp || _r2(valutakurs / 0.70);
 
-      } else if (FABRIKK === 'vitron') {
+      } else if (!claudeOk && FABRIKK === 'vitron') {
         // ── VITRON / ALIPLAST GENESIS-FLYT ───────────────────────────────────
         const pdfText1  = await extractPdfTextLayout(selectedFile);
         const faktorInp = parseNum(document.getElementById('faktor').value);
@@ -3251,8 +3407,8 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
         window._faktorTilbud = faktorInp > 0 ? faktorInp : _r2(valutakurs / 0.70);
 
-      } else {
-        // ── NORWIN/HCTC-FLYT (uendret) ───────────────────────────────────────
+      } else if (!claudeOk) {
+        // ── NORWIN/HCTC-FLYT (fallback) ───────────────────────────────────────
         const pdfText1 = await extractPdfTextLayout(selectedFile);
         const res1     = parseNorwinPDF(pdfText1, valutakurs);
 
@@ -4607,44 +4763,25 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
   // Klient-side SHA-256 auth. Brukere i localStorage. Sesjon i sessionStorage.
   // ════════════════════════════════════════════════════════════════════════
 
-  const LS_USERS   = 'norwin_kalk_users';
-  const SS_SESSION = 'norwin_kalk_session';
+  // ════════════════════════════════════════════════════════════════════════
+  // LOGIN — Supabase Auth (v2). Brukere administreres i admin.html.
+  // Det gamle localStorage/SHA-256-systemet (inkl. standardpassord og
+  // tilbakestillBrukere) er fjernet i sin helhet.
+  // ════════════════════════════════════════════════════════════════════════
 
-  // Standard-brukere (opprettes automatisk hvis ingen brukere finnes i DB)
-  const STANDARD_BRUKERE_HASH = [
-    { epost: 'marius@norwin.no',     rolle: 'kunde-admin', passHash: null, passKlar: 'Norwin2026!'    },
-    { epost: 'marius@merkapital.no', rolle: 'admin',       passHash: null, passKlar: 'Nora2026!'      },
-  ];
-
-  /** SHA-256 via Web Crypto API. Returnerer hex-streng. */
-  async function sha256(str) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  function hentBrukere() {
-    try { return JSON.parse(localStorage.getItem(LS_USERS)) || []; }
-    catch(e) { return []; }
-  }
-
-  function lagreBrukere(arr) {
-    try { localStorage.setItem(LS_USERS, JSON.stringify(arr)); }
-    catch(e) {}
-  }
+  // Stubber: brukere ligger ikke lenger i localStorage.
+  function hentBrukere() { return []; }
+  function lagreBrukere(_) {}
 
   function hentSession() {
-    try { return JSON.parse(sessionStorage.getItem(SS_SESSION)); }
-    catch(e) { return null; }
-  }
-
-  function settSession(sess) {
-    try { sessionStorage.setItem(SS_SESSION, JSON.stringify(sess)); }
-    catch(e) {}
+    if (!NORA_SESJON) noraLastSesjon();
+    if (!NORA_SESJON || !NORA_SESJON.epost) return null;
+    return { epost: NORA_SESJON.epost, rolle: NORA_SESJON.rolle || 'bruker' };
   }
 
   function slettSession() {
-    try { sessionStorage.removeItem(SS_SESSION); }
-    catch(e) {}
+    NORA_SESJON = null;
+    try { localStorage.removeItem(NORA_SESS_KEY); } catch(e) {}
   }
 
   /** Vis/skjul Admin-knappen basert på rolle. */
@@ -4658,31 +4795,24 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     }
   }
 
-  /** Vis/skjul "glemt passord"-melding. */
-  function glemtPassord() {
-    const msg = document.getElementById('glemt-passord-msg');
-    if (msg) msg.style.display = msg.style.display === 'none' ? 'block' : 'none';
+  /** Send passord-tilbakestilling på e-post (Supabase + Resend). */
+  async function glemtPassord() {
+    const epost = (document.getElementById('login-email').value || '').trim().toLowerCase();
+    const msg   = document.getElementById('glemt-passord-msg');
+    const errEl = document.getElementById('login-error');
+    errEl.textContent = '';
+    if (!epost) { errEl.textContent = 'Skriv inn e-posten din først, og klikk «Glemt passord?» igjen.'; return; }
+    try {
+      await fetch(SB_URL + '/auth/v1/recover?redirect_to=' + encodeURIComponent('https://hakunamatatula.github.io/tilbudskalkulator/admin.html'), {
+        method: 'POST',
+        headers: { apikey: SB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: epost })
+      });
+      if (msg) { msg.style.display = 'block'; msg.textContent = 'E-post med lenke for å sette nytt passord er sendt til ' + epost + '.'; }
+    } catch(e) { errEl.textContent = 'Klarte ikke sende e-post: ' + e.message; }
   }
 
-  /** Nullstill alle brukere og opprett standard-brukere på nytt. */
-  async function tilbakestillBrukere() {
-    try { localStorage.removeItem('norwin_kalk_users'); } catch(e) {}
-    try { sessionStorage.removeItem('norwin_kalk_session'); } catch(e) {}
-    const initBrukere = [];
-    for (const b of STANDARD_BRUKERE_HASH) {
-      const hash = await sha256(b.passKlar);
-      initBrukere.push({ epost: b.epost, rolle: b.rolle, passHash: hash });
-    }
-    try { localStorage.setItem('norwin_kalk_users', JSON.stringify(initBrukere)); } catch(e) {}
-    document.getElementById('login-email').value = 'marius@merkapital.no';
-    document.getElementById('login-pass').value  = 'Nora2026!';
-    document.getElementById('login-error').textContent = '';
-    const msg = document.getElementById('glemt-passord-msg');
-    if (msg) msg.style.display = 'none';
-    await loggInn();
-  }
-
-  /** Logg inn: hash passord, sjekk mot DB, sett sesjon. */
+  /** Logg inn via Supabase Auth og hent rolle fra profiles. */
   async function loggInn() {
     const epost = (document.getElementById('login-email').value || '').trim().toLowerCase();
     const pass  = document.getElementById('login-pass').value || '';
@@ -4691,24 +4821,45 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
     if (!epost || !pass) { errEl.textContent = 'Fyll inn e-post og passord.'; return; }
 
-    const brukere = hentBrukere();
-    const hash    = await sha256(pass);
-    const bruker  = brukere.find(b => b.epost === epost && b.passHash === hash);
+    let d;
+    try {
+      const r = await fetch(SB_URL + '/auth/v1/token?grant_type=password', {
+        method: 'POST',
+        headers: { apikey: SB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: epost, password: pass })
+      });
+      d = await r.json();
+      if (!r.ok) throw new Error(d.msg || d.error_description || 'Feil e-post eller passord.');
+    } catch(e) { errEl.textContent = e.message; return; }
 
-    if (!bruker) {
-      errEl.textContent = 'Feil e-post eller passord.';
-      return;
-    }
+    NORA_SESJON = {
+      access_token:  d.access_token,
+      refresh_token: d.refresh_token,
+      expires_at:    Math.floor(Date.now() / 1000) + (d.expires_in || 3600),
+      epost:         (d.user && d.user.email) || epost,
+      rolle:         'bruker'
+    };
 
-    settSession({ epost: bruker.epost, rolle: bruker.rolle });
+    try {
+      const uid = JSON.parse(atob(d.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub;
+      const pr  = await fetch(SB_URL + '/rest/v1/profiles?id=eq.' + uid + '&select=rolle,aktiv', {
+        headers: { apikey: SB_KEY, Authorization: 'Bearer ' + d.access_token }
+      });
+      const prof = (await pr.json())[0];
+      if (prof && prof.aktiv === false) { errEl.textContent = 'Brukeren er deaktivert. Kontakt administrator.'; return; }
+      const map = { nora_admin: 'admin', kunde_admin: 'kunde-admin', bruker: 'bruker' };
+      if (prof) NORA_SESJON.rolle = map[prof.rolle] || 'bruker';
+    } catch(e) { /* rolle-oppslag feilet — fortsett som vanlig bruker */ }
+
+    noraLagreSesjon();
 
     const overlay = document.getElementById('login-overlay');
     if (overlay) { overlay.classList.remove('show'); overlay.style.display = 'none'; }
 
-    oppdaterAdminKnapp(bruker.rolle);
+    oppdaterAdminKnapp(NORA_SESJON.rolle);
 
     const innloggetEl = document.getElementById('innlogget-info');
-    if (innloggetEl) innloggetEl.textContent = `${bruker.epost} (${bruker.rolle})`;
+    if (innloggetEl) innloggetEl.textContent = `${NORA_SESJON.epost} (${NORA_SESJON.rolle})`;
 
     oppdaterLogoPreview();
   }
@@ -4749,7 +4900,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     if (!listEl) return;
 
     if (brukere.length === 0) {
-      listEl.innerHTML = '<div style="color:var(--muted);font-size:13px;">Ingen brukere registrert.</div>';
+      listEl.innerHTML = '<div style="color:var(--muted);font-size:13px;">Brukere administreres i Nora AI adminpanel (admin.html).</div>';
       return;
     }
 
@@ -4771,33 +4922,13 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
   /** Legg til ny bruker. */
   async function leggTilBruker() {
-    const epost = (document.getElementById('ny-epost').value || '').trim().toLowerCase();
-    const pass  = document.getElementById('ny-pass').value || '';
-    const rolle = document.getElementById('ny-rolle').value;
     const feilEl = document.getElementById('ny-bruker-feil');
-    feilEl.textContent = '';
-
-    if (!epost || !pass) { feilEl.textContent = 'Fyll inn e-post og passord.'; return; }
-    if (pass.length < 6) { feilEl.textContent = 'Passordet må ha minst 6 tegn.'; return; }
-
-    const brukere = hentBrukere();
-    if (brukere.find(b => b.epost === epost)) { feilEl.textContent = 'Brukeren finnes allerede.'; return; }
-
-    const hash = await sha256(pass);
-    brukere.push({ epost, rolle, passHash: hash });
-    lagreBrukere(brukere);
-
-    document.getElementById('ny-epost').value = '';
-    document.getElementById('ny-pass').value  = '';
-    oppdaterBrukerListe();
+    if (feilEl) feilEl.textContent = 'Brukere administreres nå i Nora AI adminpanel (admin.html i samme mappe som appen).';
   }
 
   /** Slett bruker. */
   function slettBruker(epost) {
-    if (!confirm(`Slett brukeren ${epost}?`)) return;
-    const brukere = hentBrukere().filter(b => b.epost !== epost);
-    lagreBrukere(brukere);
-    oppdaterBrukerListe();
+    alert('Brukere administreres nå i Nora AI adminpanel (admin.html).');
   }
 
   /** Last opp egendefinert logo til localStorage. */
@@ -4833,36 +4964,18 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     oppdaterLogoPreview();
   }
 
-  /** Sjekk innlogging ved sideinnlasting. Opprett standard-brukere ved behov. */
+  /** Sjekk innlogging ved sideinnlasting (Supabase-sesjon). */
   (async function sjekkInnlogging() {
-    // Initialiser standard-brukere hvis tomme
-    let brukere = hentBrukere();
-    if (brukere.length === 0) {
-      const initBrukere = [];
-      for (const b of STANDARD_BRUKERE_HASH) {
-        const hash = await sha256(b.passKlar);
-        initBrukere.push({ epost: b.epost, rolle: b.rolle, passHash: hash });
-      }
-      lagreBrukere(initBrukere);
-      brukere = initBrukere;
-    }
-
-    // Sjekk eksisterende sesjon
-    const sess = hentSession();
     const overlay = document.getElementById('login-overlay');
-
-    if (sess && sess.epost && sess.rolle) {
-      // Gyldig sesjon — bekreft at brukeren fortsatt finnes i DB
-      const funnet = brukere.find(b => b.epost === sess.epost);
-      if (funnet) {
-        if (overlay) { overlay.style.display = 'none'; overlay.classList.remove('show'); }
-        oppdaterAdminKnapp(sess.rolle);
-        oppdaterLogoPreview();
-        return;
-      }
+    const token = await noraGyldigToken();
+    if (token && NORA_SESJON && NORA_SESJON.epost) {
+      if (overlay) { overlay.style.display = 'none'; overlay.classList.remove('show'); }
+      oppdaterAdminKnapp(NORA_SESJON.rolle || 'bruker');
+      const innloggetEl = document.getElementById('innlogget-info');
+      if (innloggetEl) innloggetEl.textContent = `${NORA_SESJON.epost} (${NORA_SESJON.rolle || 'bruker'})`;
+      oppdaterLogoPreview();
+      return;
     }
-
-    // Ingen/ugyldig sesjon — vis login
     if (overlay) { overlay.style.display = 'flex'; overlay.classList.add('show'); }
     oppdaterAdminKnapp(null);
   })();
