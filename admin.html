@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v4"/>
+<meta name="app-version" content="admin-2026-07-04-v5"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -104,7 +104,10 @@
           <div><label>Org.nr</label><input id="ny-kunde-orgnr"></div>
           <div><button class="btn" onclick="opprettKunde()">+ Opprett kunde</button></div>
         </div>
-        <p class="hjelpetekst">Standardinnstillinger (30 % dekning, min 20/maks 50) opprettes automatisk.</p>
+        <div style="margin-top:12px"><label>Fabrikker kunden bruker (velges eksplisitt — ingen arves)</label>
+          <div id="ny-kunde-fabrikker" style="display:flex;gap:14px;flex-wrap:wrap;padding:6px 0"></div>
+        </div>
+        <p class="hjelpetekst">Standardinnstillinger (30 % dekning, min 20/maks 50) opprettes automatisk. Fabrikker og all annen kundedata er isolert per kunde.</p>
       </div>
       <div class="kort"><h3 style="margin-bottom:12px">Kunder</h3><div id="kunde-liste"></div></div>
     </section>
@@ -147,9 +150,8 @@
           <div><label>Norsk *</label><input id="term-no"></div>
           <div><label>Fabrikk (tom = alle)</label><select id="term-fabrikk">
             <option value="">Alle fabrikker</option>
-            <option>HCTC</option><option>Aldens</option><option>Aliuminatas</option><option>Vitron</option><option>Aradas</option>
           </select></div>
-          <div id="term-scope-rad" hidden><label>Gjelder</label><select id="term-scope">
+          <div id="term-scope-rad" hidden><label>Gjelder</label><select id="term-scope" onchange="visOrdliste()">
             <option value="global">Globalt (alle kunder)</option>
             <option value="kunde">Kun valgt kunde</option>
           </select></div>
@@ -189,7 +191,17 @@ const SB_URL = 'https://nykvylfvouwmoclraxqu.supabase.co';
 const SB_KEY = 'sb_publishable_x-8Q-9gRRnw144STE1QCwA_zHfrE9_P';
 const LAGER = 'nora_sesjon'; // delt med kalkulatoren (index.html) — én innlogging gjelder begge
 
-let sesjon = null, minProfil = null, valgtKunde = null, kunder = [], loggData = [];
+let sesjon = null, minProfil = null, valgtKunde = null, kunder = [], loggData = [], redigererFabrikkerFor = null;
+const FABRIKKER = ['HCTC','Aldens','Aliuminatas','Vitron','Aradas'];
+function fabrikkBokser(klasse, valgte){
+  return FABRIKKER.map(f =>
+    '<label style="font-size:13.5px;text-transform:none;letter-spacing:0;display:inline-flex;gap:5px;align-items:center;font-weight:500;color:var(--text);cursor:pointer">'+
+    '<input type="checkbox" class="'+klasse+'" value="'+f+'" style="width:auto"'+((valgte||[]).includes(f)?' checked':'')+'>'+f+'</label>'
+  ).join('');
+}
+function lesFabrikkBokser(klasse){
+  return [...document.querySelectorAll('input.'+klasse+':checked')].map(i=>i.value);
+}
 
 // ── Hjelpere ──────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -325,18 +337,36 @@ function oppdaterAktivFane(){
 // ── Kunder (kun nora_admin) ───────────────────────────────
 async function visKunder(){
   await lastKunder();
+  if($('ny-kunde-fabrikker') && !$('ny-kunde-fabrikker').innerHTML) $('ny-kunde-fabrikker').innerHTML = fabrikkBokser('nyfab', []);
   $('kunde-liste').innerHTML = '<table><tr><th>Navn</th><th>Org.nr</th><th>Fabrikker</th><th>Status</th><th></th></tr>'+
-    kunder.map(k=>'<tr><td><strong>'+esc(k.navn)+'</strong></td><td>'+esc(k.orgnr||'—')+'</td><td style="font-family:var(--mono);font-size:12px">'+esc((k.aktive_fabrikker||[]).join(', '))+'</td>'+
+    kunder.map(k=>{
+      const fabCelle = (redigererFabrikkerFor===k.id)
+        ? '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">'+fabrikkBokser('redfab', k.aktive_fabrikker)+'</div>'+
+          '<button class="btn btn-liten" onclick="lagreFabrikker(\''+k.id+'\')">Lagre</button> '+
+          '<button class="btn btn-ghost btn-liten" onclick="redigererFabrikkerFor=null;visKunder()">Avbryt</button>'
+        : '<span style="font-family:var(--mono);font-size:12px">'+esc((k.aktive_fabrikker||[]).join(', ')||'ingen valgt')+'</span> '+
+          '<button class="btn btn-ghost btn-liten" onclick="redigererFabrikkerFor=\''+k.id+'\';visKunder()">Endre</button>';
+      return '<tr><td><strong>'+esc(k.navn)+'</strong></td><td>'+esc(k.orgnr||'—')+'</td><td>'+fabCelle+'</td>'+
       '<td><span class="pill'+(k.aktiv?'':' inaktiv')+'">'+(k.aktiv?'aktiv':'deaktivert')+'</span></td>'+
-      '<td><button class="btn btn-ghost btn-liten" onclick="toggleKunde(\''+k.id+'\','+(!k.aktiv)+')">'+(k.aktiv?'Deaktiver':'Aktiver')+'</button></td></tr>').join('')+'</table>';
+      '<td><button class="btn btn-ghost btn-liten" onclick="toggleKunde(\''+k.id+'\','+(!k.aktiv)+')">'+(k.aktiv?'Deaktiver':'Aktiver')+'</button></td></tr>';
+    }).join('')+'</table>';
+}
+async function lagreFabrikker(id){
+  try{
+    await api('/rest/v1/kunder?id=eq.'+id, {method:'PATCH', body:JSON.stringify({aktive_fabrikker: lesFabrikkBokser('redfab')})});
+    redigererFabrikkerFor = null;
+    meld('app-melding','Fabrikker oppdatert.');
+    await visKunder();
+  }catch(e){ meld('app-melding',e.message,'feil'); }
 }
 async function opprettKunde(){
   const navn=$('ny-kunde-navn').value.trim(), orgnr=$('ny-kunde-orgnr').value.trim();
   if(!navn) return meld('app-melding','Selskapsnavn er påkrevd','feil');
   try{
-    const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({action:'opprett_kunde', navn, orgnr:orgnr||null})});
+    const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({action:'opprett_kunde', navn, orgnr:orgnr||null, fabrikker: lesFabrikkBokser('nyfab')})});
     if(r.error) throw new Error(r.error);
     $('ny-kunde-navn').value=''; $('ny-kunde-orgnr').value='';
+    document.querySelectorAll('input.nyfab').forEach(i=>i.checked=false);
     meld('app-melding','Kunden «'+navn+'» er opprettet med standardinnstillinger.');
     valgtKunde = r.kunde.id; await visKunder();
   }catch(e){ meld('app-melding',e.message,'feil'); }
@@ -403,6 +433,14 @@ async function lagreInnstillinger(){
 async function visOrdliste(){
   const termer = await api('/rest/v1/terminologi?select=*&or=(kunde_id.is.null,kunde_id.eq.'+valgtKunde+')&order=engelsk');
   const erNora = minProfil.rolle==='nora_admin';
+  // Fabrikk-valget begrenses til valgt kundes fabrikker (global term for nora_admin: alle)
+  try{
+    const kd = await api('/rest/v1/kunder?id=eq.'+valgtKunde+'&select=aktive_fabrikker');
+    const kundensFabrikker = (kd && kd[0] && kd[0].aktive_fabrikker) || [];
+    const alle = erNora && $('term-scope') && $('term-scope').value==='global';
+    const liste = alle ? FABRIKKER : kundensFabrikker;
+    $('term-fabrikk').innerHTML = '<option value="">Alle fabrikker</option>'+liste.map(f=>'<option>'+f+'</option>').join('');
+  }catch(e){}
   $('term-liste').innerHTML = '<table><tr><th>Engelsk</th><th>Norsk</th><th>Fabrikk</th><th>Gjelder</th><th></th></tr>'+
     termer.map(t=>{
       const kanSlette = erNora || t.kunde_id;
