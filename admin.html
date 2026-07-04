@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v8"/>
+<meta name="app-version" content="admin-2026-07-04-v9"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -207,6 +207,7 @@ const SB_KEY = 'sb_publishable_x-8Q-9gRRnw144STE1QCwA_zHfrE9_P';
 const LAGER = 'nora_sesjon'; // delt med kalkulatoren (index.html) — én innlogging gjelder begge
 
 let sesjon = null, minProfil = null, valgtKunde = null, kunder = [], loggData = [], redigererFabrikkerFor = null, minKundeNavn = '';
+let redigererTermId = null, ordlisteApen = { kunde: true, global: false };
 const FABRIKKER = ['HCTC','Aldens','Aliuminatas','Vitron','Aradas'];
 function fabrikkBokser(klasse, valgte){
   return FABRIKKER.map(f =>
@@ -476,20 +477,52 @@ async function visOrdliste(){
     $('term-fabrikk').innerHTML = '<option value="">Alle fabrikker</option>'+FABRIKKER.map(f=>'<option>'+f+'</option>').join('');
   }
   const kNavn = (kunder.find(k=>k.id===valgtKunde)||{}).navn || minKundeNavn || 'valgt kunde';
-  const tabell = (liste, kanSlette) => liste.length
-    ? '<table><tr><th>Engelsk</th><th>Norsk</th><th>Fabrikk</th><th></th></tr>'+
-      liste.map(t=>'<tr><td>'+esc(t.engelsk)+'</td><td><strong>'+esc(t.norsk)+'</strong></td><td>'+esc(t.fabrikk||'alle')+'</td>'+
-        '<td>'+(kanSlette?'<button class="btn btn-ghost btn-liten" onclick="slettTerm('+t.id+')">Slett</button>':'')+'</td></tr>').join('')+'</table>'
+  const rad = (t, kanEndre) => {
+    if (redigererTermId === t.id) {
+      const fabValg = ['<option value=""'+(t.fabrikk?'':' selected')+'>Alle fabrikker</option>']
+        .concat(FABRIKKER.map(f=>'<option'+(t.fabrikk===f?' selected':'')+'>'+f+'</option>')).join('');
+      return '<tr style="background:var(--bg)">'+
+        '<td><input id="red-en-'+t.id+'" value="'+esc(t.engelsk)+'"></td>'+
+        '<td><input id="red-no-'+t.id+'" value="'+esc(t.norsk)+'"></td>'+
+        '<td><select id="red-fab-'+t.id+'">'+fabValg+'</select></td>'+
+        '<td style="white-space:nowrap"><button class="btn btn-liten" onclick="lagreTerm('+t.id+')">Lagre</button> '+
+        '<button class="btn btn-ghost btn-liten" onclick="redigererTermId=null;visOrdliste()">Avbryt</button></td></tr>';
+    }
+    return '<tr><td>'+esc(t.engelsk)+'</td><td><strong>'+esc(t.norsk)+'</strong></td><td>'+esc(t.fabrikk||'alle')+'</td>'+
+      '<td style="white-space:nowrap">'+(kanEndre
+        ? '<button class="btn btn-ghost btn-liten" onclick="redigererTermId='+t.id+';visOrdliste()">Endre</button> '+
+          '<button class="btn btn-ghost btn-liten" onclick="slettTerm('+t.id+')">Slett</button>'
+        : '')+'</td></tr>';
+  };
+  const tabell = (liste, kanEndre) => liste.length
+    ? '<table><tr><th>Engelsk</th><th>Norsk</th><th>Fabrikk</th><th></th></tr>'+liste.map(t=>rad(t, kanEndre)).join('')+'</table>'
     : '<p class="hjelpetekst">Ingen termer ennå.</p>';
   const kundens = termer.filter(t=>t.kunde_id);
   const globale = termer.filter(t=>!t.kunde_id);
+  const seksjon = (nokkel, tittel, undertekst, liste, kanEndre) => {
+    const apen = ordlisteApen[nokkel];
+    return '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:12px;overflow:hidden">'+
+      '<div onclick="ordlisteApen.'+nokkel+'=!ordlisteApen.'+nokkel+';visOrdliste()" style="cursor:pointer;padding:12px 16px;background:var(--bg3);display:flex;justify-content:space-between;align-items:center">'+
+        '<div><strong>'+tittel+'</strong> <span class="pill" style="margin-left:6px">'+liste.length+'</span>'+
+        '<div class="hjelpetekst">'+undertekst+'</div></div>'+
+        '<span style="font-size:18px;color:var(--dim)">'+(apen?'\u25be':'\u25b8')+'</span>'+
+      '</div>'+
+      (apen ? '<div style="padding:12px 16px">'+tabell(liste, kanEndre)+'</div>' : '')+
+    '</div>';
+  };
   $('term-liste').innerHTML =
-    '<h3 style="margin-bottom:8px">Kundens egen ordliste — '+esc(kNavn)+'</h3>'+
-    '<p class="hjelpetekst" style="margin-bottom:8px">Gjelder KUN denne kunden. Andre kunder kan ikke se disse.</p>'+
-    tabell(kundens, true)+
-    '<h3 style="margin:22px 0 8px">Global ordliste (Nora AI)</h3>'+
-    '<p class="hjelpetekst" style="margin-bottom:8px">Felles fagterminologi som gjelder alle kunder. Kun Nora AI-admin kan endre den.</p>'+
-    tabell(globale, erNora);
+    seksjon('kunde', 'Kundens egen ordliste \u2014 '+esc(kNavn), 'Gjelder KUN denne kunden. Andre kunder kan ikke se disse.', kundens, true) +
+    seksjon('global', 'Global ordliste (Nora AI)', 'Felles fagterminologi for alle kunder. Kun Nora AI-admin kan endre den.', globale, erNora);
+}
+async function lagreTerm(id){
+  const engelsk = $('red-en-'+id).value.trim(), norsk = $('red-no-'+id).value.trim(), fabrikk = $('red-fab-'+id).value || null;
+  if(!engelsk || !norsk) return meld('app-melding','B\u00e5de engelsk og norsk m\u00e5 fylles ut','feil');
+  try{
+    await api('/rest/v1/terminologi?id=eq.'+id, {method:'PATCH', body:JSON.stringify({engelsk, norsk, fabrikk})});
+    redigererTermId = null;
+    meld('app-melding','Term oppdatert \u2014 gjelder alle nye tilbud umiddelbart.');
+    await visOrdliste();
+  }catch(e){ meld('app-melding',e.message,'feil'); }
 }
 async function leggTilTerm(){
   const engelsk=$('term-en').value.trim(), norsk=$('term-no').value.trim(), fabrikk=$('term-fabrikk').value||null;

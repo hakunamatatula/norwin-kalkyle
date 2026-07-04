@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="2026-07-04-v40"/>
+<meta name="app-version" content="2026-07-04-v41"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
@@ -689,6 +689,25 @@
     if (a < 0 || b <= a) throw new Error('Uventet svar fra Claude');
     return JSON.parse(txt.slice(a, b + 1));
   }
+
+  // ── Auto-høyde til omsluttende iframe (noraai.no/tilbudskalkulator-app) ──
+  // Sender innholdshøyden til foreldresiden, som justerer iframe-høyden.
+  // Fjerner det indre skrollefeltet når appen er embeddet.
+  (function() {
+    let sist = 0;
+    function meldHoyde() {
+      try {
+        if (window.parent === window) return;
+        const h = document.body.scrollHeight;
+        if (Math.abs(h - sist) < 4) return;
+        sist = h;
+        window.parent.postMessage({ noraKalkHoyde: h }, '*');
+      } catch(e) {}
+    }
+    try { new ResizeObserver(meldHoyde).observe(document.body); } catch(e) {}
+    window.addEventListener('load', meldHoyde);
+    setInterval(meldHoyde, 1500);
+  })();
 
   /** Oppdaterer «Tilbudsverktøy — Kundenavn» i toppen. */
   function oppdaterHeaderKunde() {
