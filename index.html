@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="2026-07-04-v36"/>
+<meta name="app-version" content="2026-07-04-v37"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
@@ -492,54 +492,6 @@
 </div>
 
 <!-- ── Admin-panel (slideout) ──────────────────────────────────────────── -->
-<div class="admin-overlay" id="admin-overlay" onclick="if(event.target===this)lukkAdminPanel()">
-  <div class="admin-panel">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
-      <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:18px;font-weight:700;color:var(--text);">Admin</div>
-      <button onclick="lukkAdminPanel()" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1;">✕</button>
-    </div>
-
-    <div class="admin-section">
-      <a href="admin.html" style="display:block;background:var(--text);color:#FFF8F3;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:14px;">⚙ Åpne Nora AI Adminpanel — kunder, brukere, innstillinger, ordliste, endringslogg</a>
-    </div>
-
-    <div class="admin-section">
-      <div class="admin-section-title">Logo i kundetilbud</div>
-      <div style="font-size:13px;color:var(--muted);margin-bottom:12px;">Last opp SVG/PNG (maks 200×60&nbsp;px).</div>
-      <input type="file" id="logo-file-input" accept=".svg,.png,.jpg,.jpeg" style="position:absolute;width:1px;height:1px;opacity:0;" onchange="lastOppLogo(this)" />
-      <div id="logo-preview" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:16px;text-align:center;min-height:56px;display:flex;align-items:center;justify-content:center;margin-bottom:10px;">
-        <span style="color:var(--muted);font-size:13px;" id="logo-preview-text">Ingen egendefinert logo</span>
-      </div>
-      <button class="btn" onclick="document.getElementById('logo-file-input').click()" style="margin-bottom:8px;">↑ &nbsp;Last opp logo</button>
-      <button onclick="nullstillLogo()" style="width:100%;background:transparent;border:1px solid var(--border);color:var(--muted);padding:10px;border-radius:6px;cursor:pointer;font-family:'Bricolage Grotesque',sans-serif;font-size:13px;font-weight:600;margin-top:4px;">↺ &nbsp;Tilbakestill til standard</button>
-    </div>
-
-    <div class="admin-section">
-      <div class="admin-section-title">Brukere</div>
-      <div id="user-list" style="margin-bottom:16px;"></div>
-      <div style="padding:16px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);">
-        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;font-weight:600;">Legg til bruker</div>
-        <div class="field"><div class="label">E-post</div><input type="email" id="ny-epost" placeholder="bruker@eksempel.no" /></div>
-        <div class="field"><div class="label">Passord (minst 6 tegn)</div><input type="password" id="ny-pass" placeholder="Velg passord" /></div>
-        <div class="field"><div class="label">Rolle</div>
-          <select id="ny-rolle">
-            <option value="bruker">Bruker</option>
-            <option value="kunde-admin">Kunde Admin</option>
-            <option value="admin">Admin (Nora AI)</option>
-          </select></div>
-        <div class="error" id="ny-bruker-feil" style="margin-bottom:6px;font-size:12px;"></div>
-        <button class="btn" onclick="leggTilBruker()">+ &nbsp;Legg til bruker</button>
-      </div>
-    </div>
-
-    <div class="admin-section">
-      <div class="admin-section-title">Innlogget</div>
-      <div style="font-size:13px;color:var(--muted);margin-bottom:12px;" id="innlogget-info">—</div>
-      <button onclick="loggUt()" style="width:100%;background:transparent;border:1px solid rgba(248,113,113,0.35);color:#C0392B;padding:10px;border-radius:6px;cursor:pointer;font-family:'Bricolage Grotesque',sans-serif;font-size:13px;font-weight:600;">→ &nbsp;Logg ut</button>
-    </div>
-  </div>
-</div>
-
 <div class="header">
   <div>
     <div class="logo-name">MER KAPITAL</div>
@@ -547,7 +499,9 @@
   </div>
   <div style="display:flex;align-items:center;gap:16px;">
     <div id="today-date" style="font-size:15px;color:var(--muted);font-weight:600;"></div>
-    <button onclick="visAdminPanel()" title="Admin: se oversettelseslogg" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:4px;cursor:pointer;font-family:'Source Sans 3',sans-serif;letter-spacing:0.06em;text-transform:uppercase;">⚙ Admin</button>
+    <button id="adminpanel-knapp" onclick="location.href='admin.html'" title="Kunder, brukere, innstillinger, ordliste, endringslogg" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:4px;cursor:pointer;font-family:'Bricolage Grotesque',sans-serif;letter-spacing:0.06em;text-transform:uppercase;">⚙ Adminpanel</button>
+    <span id="innlogget-info" style="font-size:12px;color:var(--dim);"></span>
+    <button onclick="loggUt()" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:4px;cursor:pointer;font-family:'Bricolage Grotesque',sans-serif;letter-spacing:0.06em;text-transform:uppercase;">Logg ut</button>
     <span style="font-size:10px;color:var(--dim);opacity:0.7;">v3</span>
   </div>
 </div>
@@ -4790,7 +4744,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
   /** Vis/skjul Admin-knappen basert på rolle. */
   function oppdaterAdminKnapp(rolle) {
-    const btn = document.querySelector('button[onclick="visAdminPanel()"]');
+    const btn = document.getElementById('adminpanel-knapp');
     if (!btn) return;
     if (rolle === 'admin' || rolle === 'kunde-admin') {
       btn.style.display = '';
@@ -4879,60 +4833,9 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     document.getElementById('login-error').textContent = '';
   }
 
-  /** Vis admin-panel (kun for admin/kunde-admin). */
-  function visAdminPanel() {
-    const sess = hentSession();
-    if (!sess || (sess.rolle !== 'admin' && sess.rolle !== 'kunde-admin')) return;
-    oppdaterBrukerListe();
-    oppdaterLogoPreview();
-    const innloggetEl = document.getElementById('innlogget-info');
-    if (innloggetEl) innloggetEl.textContent = `${sess.epost} (${sess.rolle})`;
-    const panel = document.getElementById('admin-overlay');
-    if (panel) { panel.style.display = 'flex'; }
-  }
-
   function lukkAdminPanel() {
     const panel = document.getElementById('admin-overlay');
     if (panel) panel.style.display = 'none';
-  }
-
-  /** Oppdater bruker-listen i admin-panelet. */
-  function oppdaterBrukerListe() {
-    const brukere = hentBrukere();
-    const sess    = hentSession();
-    const listEl  = document.getElementById('user-list');
-    if (!listEl) return;
-
-    if (brukere.length === 0) {
-      listEl.innerHTML = '<div style="color:var(--muted);font-size:13px;">Brukere administreres i Nora AI adminpanel (admin.html).</div>';
-      return;
-    }
-
-    listEl.innerHTML = brukere.map(b => `
-      <div class="user-row" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
-        <div>
-          <div class="user-email" style="font-size:14px;color:var(--text);font-weight:600;">${b.epost}</div>
-          <div class="user-role" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">${b.rolle}</div>
-        </div>
-        ${b.epost !== sess?.epost
-          ? `<button class="user-del-btn" onclick="slettBruker('${b.epost}')"
-               style="background:transparent;border:1px solid rgba(248,113,113,0.3);color:#C0392B;font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;">
-               Slett
-             </button>`
-          : '<span style="font-size:11px;color:var(--muted);">(deg)</span>'}
-      </div>
-    `).join('');
-  }
-
-  /** Legg til ny bruker. */
-  async function leggTilBruker() {
-    const feilEl = document.getElementById('ny-bruker-feil');
-    if (feilEl) feilEl.textContent = 'Brukere administreres nå i Nora AI adminpanel (admin.html i samme mappe som appen).';
-  }
-
-  /** Slett bruker. */
-  function slettBruker(epost) {
-    alert('Brukere administreres nå i Nora AI adminpanel (admin.html).');
   }
 
   /** Last opp egendefinert logo til localStorage. */

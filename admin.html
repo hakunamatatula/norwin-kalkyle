@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v3"/>
+<meta name="app-version" content="admin-2026-07-04-v4"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -159,6 +159,20 @@
       </div>
       <div class="kort"><h3 style="margin-bottom:12px">Ordliste</h3><div id="term-liste"></div></div>
     </section>
+    <section id="fane-logo" hidden>
+      <div class="kort">
+        <h3 style="margin-bottom:12px">Logo i kundetilbud</h3>
+        <p class="hjelpetekst" style="margin-bottom:14px">Logoen vises øverst i genererte kundetilbud. SVG/PNG, maks 200×60 px. NB: Lagres foreløpig per maskin/nettleser. Sentral lagring per kunde kommer i en senere fase.</p>
+        <input type="file" id="logo-fil" accept=".svg,.png,.jpg,.jpeg" style="position:absolute;width:1px;height:1px;opacity:0" onchange="lastOppLogo(this)">
+        <div id="logo-preview" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:8px;padding:18px;text-align:center;min-height:64px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
+          <span class="hjelpetekst">Ingen egendefinert logo — standardlogo brukes</span>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn" onclick="document.getElementById('logo-fil').click()">↑ Last opp logo</button>
+          <button class="btn btn-ghost" onclick="nullstillLogo()">↺ Tilbakestill til standard</button>
+        </div>
+      </div>
+    </section>
     <section id="fane-logg" hidden>
       <div class="kort">
         <div class="verktoylinje">
@@ -270,7 +284,7 @@ async function startApp(){
   vis('view-app');
 
   const erNora = minProfil.rolle==='nora_admin';
-  const faner = [...(erNora?[['kunder','Kunder']]:[]), ['brukere','Brukere'], ['innstillinger','Innstillinger'], ['ordliste','Ordliste'], ['logg','Endringslogg']];
+  const faner = [...(erNora?[['kunder','Kunder']]:[]), ['brukere','Brukere'], ['innstillinger','Innstillinger'], ['ordliste','Ordliste'], ['logo','Logo i tilbud'], ['logg','Endringslogg']];
   $('faner').innerHTML = faner.map(([id,navn])=>'<button id="fane-btn-'+id+'" onclick="byttFane(\''+id+'\')">'+navn+'</button>').join('');
   $('term-scope-rad').hidden = !erNora;
   if(erNora){
@@ -297,7 +311,7 @@ function byttKunde(){ valgtKunde = $('kundevelger').value; oppdaterAktivFane(); 
 let aktivFane = null;
 function byttFane(id){
   aktivFane = id;
-  ['kunder','brukere','innstillinger','ordliste','logg'].forEach(f=>{
+  ['kunder','brukere','innstillinger','ordliste','logo','logg'].forEach(f=>{
     const s=$('fane-'+f), b=$('fane-btn-'+f);
     if(s) s.hidden = f!==id;
     if(b) b.classList.toggle('aktiv', f===id);
@@ -305,7 +319,7 @@ function byttFane(id){
   oppdaterAktivFane();
 }
 function oppdaterAktivFane(){
-  ({kunder:visKunder, brukere:visBrukere, innstillinger:visInnstillinger, ordliste:visOrdliste, logg:lastLogg})[aktivFane]?.();
+  ({kunder:visKunder, brukere:visBrukere, innstillinger:visInnstillinger, ordliste:visOrdliste, logo:visLogo, logg:lastLogg})[aktivFane]?.();
 }
 
 // ── Kunder (kun nora_admin) ───────────────────────────────
@@ -411,6 +425,32 @@ async function leggTilTerm(){
 async function slettTerm(id){
   try{ await api('/rest/v1/terminologi?id=eq.'+id, {method:'DELETE'}); await visOrdliste(); }
   catch(e){ meld('app-melding',e.message,'feil'); }
+}
+
+// ── Logo i kundetilbud (delt localStorage med kalkulatoren) ──
+function visLogo(){
+  const el = $('logo-preview');
+  const lagret = localStorage.getItem('norwin_kalk_logo');
+  el.innerHTML = lagret
+    ? '<img src="'+lagret+'" alt="Logo" style="max-height:52px;max-width:100%;object-fit:contain">'
+    : '<span class="hjelpetekst">Ingen egendefinert logo — standardlogo brukes</span>';
+}
+function lastOppLogo(input){
+  const fil = input.files[0];
+  if(!fil) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try { localStorage.setItem('norwin_kalk_logo', e.target.result); }
+    catch(err){ return meld('app-melding','Klarte ikke lagre logo (for stor fil?)','feil'); }
+    meld('app-melding','Logo lagret — brukes i nye kundetilbud.');
+    visLogo();
+  };
+  reader.readAsDataURL(fil);
+}
+function nullstillLogo(){
+  try { localStorage.removeItem('norwin_kalk_logo'); } catch(e){}
+  meld('app-melding','Logo tilbakestilt til standard.');
+  visLogo();
 }
 
 // ── Endringslogg ──────────────────────────────────────────
