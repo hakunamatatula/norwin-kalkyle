@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="2026-07-04-v34"/>
+<meta name="app-version" content="2026-07-04-v35"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
@@ -4966,6 +4966,13 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
   /** Sjekk innlogging ved sideinnlasting (Supabase-sesjon). */
   (async function sjekkInnlogging() {
+    // Recovery-/invitasjonslenke fra e-post? Send videre til sett-passord-siden
+    // (admin.html) med tokens intakt — uansett hvilken side lenken landet på.
+    const hashParams = new URLSearchParams(location.hash.slice(1));
+    if (hashParams.get('access_token') && ['invite','recovery','signup'].includes(hashParams.get('type'))) {
+      location.replace('admin.html' + location.hash);
+      return;
+    }
     const overlay = document.getElementById('login-overlay');
     const token = await noraGyldigToken();
     if (token && NORA_SESJON && NORA_SESJON.epost) {
