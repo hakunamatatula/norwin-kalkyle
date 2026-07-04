@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v6"/>
+<meta name="app-version" content="admin-2026-07-04-v7"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -104,9 +104,6 @@
         <div class="grid3">
           <div><label>Selskapsnavn *</label><input id="ny-kunde-navn"></div>
           <div><label>Org.nr</label><input id="ny-kunde-orgnr"></div>
-        </div>
-        <div style="margin-top:12px"><label>Fabrikker kunden bruker (velges eksplisitt — ingen arves)</label>
-          <div id="ny-kunde-fabrikker" style="display:flex;gap:14px;flex-wrap:wrap;padding:6px 0"></div>
         </div>
         <div style="margin-top:12px"><label>Innstillinger (dekning %)</label>
           <div class="grid3">
@@ -365,28 +362,13 @@ function oppdaterAktivFane(){
 // ── Kunder (kun nora_admin) ───────────────────────────────
 async function visKunder(){
   await lastKunder();
-  if($('ny-kunde-fabrikker') && !$('ny-kunde-fabrikker').innerHTML) $('ny-kunde-fabrikker').innerHTML = fabrikkBokser('nyfab', []);
-  $('kunde-liste').innerHTML = '<table><tr><th>Navn</th><th>Org.nr</th><th>Fabrikker</th><th>Status</th><th></th></tr>'+
-    kunder.map(k=>{
-      const fabCelle = (redigererFabrikkerFor===k.id)
-        ? '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">'+fabrikkBokser('redfab', k.aktive_fabrikker)+'</div>'+
-          '<button class="btn btn-liten" onclick="lagreFabrikker(\''+k.id+'\')">Lagre</button> '+
-          '<button class="btn btn-ghost btn-liten" onclick="redigererFabrikkerFor=null;visKunder()">Avbryt</button>'
-        : '<span style="font-family:var(--mono);font-size:12px">'+esc((k.aktive_fabrikker||[]).join(', ')||'ingen valgt')+'</span> '+
-          '<button class="btn btn-ghost btn-liten" onclick="redigererFabrikkerFor=\''+k.id+'\';visKunder()">Endre</button>';
-      return '<tr><td><strong>'+esc(k.navn)+'</strong></td><td>'+esc(k.orgnr||'—')+'</td><td>'+fabCelle+'</td>'+
+  $('kunde-liste').innerHTML = '<table><tr><th>Navn</th><th>Org.nr</th><th>Status</th><th></th></tr>'+
+    kunder.map(k=>
+      '<tr><td><strong>'+esc(k.navn)+'</strong></td><td>'+esc(k.orgnr||'—')+'</td>'+
       '<td><span class="pill'+(k.aktiv?'':' inaktiv')+'">'+(k.aktiv?'aktiv':'deaktivert')+'</span></td>'+
       '<td style="white-space:nowrap"><button class="btn btn-liten" onclick="administrerKunde(\''+k.id+'\')">Administrer →</button> '+
-      '<button class="btn btn-ghost btn-liten" onclick="toggleKunde(\''+k.id+'\','+(!k.aktiv)+')">'+(k.aktiv?'Deaktiver':'Aktiver')+'</button></td></tr>';
-    }).join('')+'</table>';
-}
-async function lagreFabrikker(id){
-  try{
-    await api('/rest/v1/kunder?id=eq.'+id, {method:'PATCH', body:JSON.stringify({aktive_fabrikker: lesFabrikkBokser('redfab')})});
-    redigererFabrikkerFor = null;
-    meld('app-melding','Fabrikker oppdatert.');
-    await visKunder();
-  }catch(e){ meld('app-melding',e.message,'feil'); }
+      '<button class="btn btn-ghost btn-liten" onclick="toggleKunde(\''+k.id+'\','+(!k.aktiv)+')">'+(k.aktiv?'Deaktiver':'Aktiver')+'</button></td></tr>'
+    ).join('')+'</table>';
 }
 function lesFilSomDataUrl(input){
   return new Promise((res)=>{
@@ -408,7 +390,6 @@ async function opprettKunde(){
   try{
     const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({
       action:'opprett_kunde', navn, orgnr:orgnr||null,
-      fabrikker: lesFabrikkBokser('nyfab'),
       dekning_prosent:+$('nyk-dekning').value||30, dekning_min:+$('nyk-min').value||20, dekning_maks:+$('nyk-maks').value||50,
       logo_data,
       admin_bruker: admEpost ? {epost:admEpost, fornavn:admFornavn, etternavn:admEtternavn} : null
@@ -416,7 +397,6 @@ async function opprettKunde(){
     if(r.error) throw new Error(r.error);
     ['ny-kunde-navn','ny-kunde-orgnr','nyk-adm-fornavn','nyk-adm-etternavn','nyk-adm-epost'].forEach(i=>$(i).value='');
     $('nyk-logo').value=''; $('nyk-dekning').value=30; $('nyk-min').value=20; $('nyk-maks').value=50;
-    document.querySelectorAll('input.nyfab').forEach(i=>i.checked=false);
     valgtKunde = r.kunde.id;
     await lastKunder();
     $('kundevelger').value = valgtKunde;
@@ -491,14 +471,10 @@ async function lagreInnstillinger(){
 async function visOrdliste(){
   const termer = await api('/rest/v1/terminologi?select=*&or=(kunde_id.is.null,kunde_id.eq.'+valgtKunde+')&order=engelsk');
   const erNora = minProfil.rolle==='nora_admin';
-  // Fabrikk-valget begrenses til valgt kundes fabrikker (global term for nora_admin: alle)
-  try{
-    const kd = await api('/rest/v1/kunder?id=eq.'+valgtKunde+'&select=aktive_fabrikker');
-    const kundensFabrikker = (kd && kd[0] && kd[0].aktive_fabrikker) || [];
-    const alle = erNora && $('term-scope') && $('term-scope').value==='global';
-    const liste = alle ? FABRIKKER : kundensFabrikker;
-    $('term-fabrikk').innerHTML = '<option value="">Alle fabrikker</option>'+liste.map(f=>'<option>'+f+'</option>').join('');
-  }catch(e){}
+  // Fabrikk her er en oversettelses-tag (hvilket fabrikkformat termen gjelder), ikke kundekonfigurasjon
+  if(!$('term-fabrikk').options.length || $('term-fabrikk').options.length===1){
+    $('term-fabrikk').innerHTML = '<option value="">Alle fabrikker</option>'+FABRIKKER.map(f=>'<option>'+f+'</option>').join('');
+  }
   $('term-liste').innerHTML = '<table><tr><th>Engelsk</th><th>Norsk</th><th>Fabrikk</th><th>Gjelder</th><th></th></tr>'+
     termer.map(t=>{
       const kanSlette = erNora || t.kunde_id;
