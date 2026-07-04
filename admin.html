@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="app-version" content="admin-2026-07-04-v1"/>
+<title>Nora AI — Adminpanel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" media="print" onload="this.media='all'">
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#FFF8F3; --bg2:#FAFAF8; --surface:#FFFFFF; --text:#21263E; --dim:#565C72;
+    --coral:#FB827A; --coral-deep:#E8604F; --border:#E8E0D8;
+    --shadow:0 2px 12px rgba(33,38,62,.08); --radius:12px;
+    --display:'Bricolage Grotesque',sans-serif; --body:'Plus Jakarta Sans',sans-serif; --mono:'IBM Plex Mono',monospace;
+  }
+  body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.6;min-height:100vh}
+  h1,h2,h3{font-family:var(--display)}
+  button{font-family:var(--display);cursor:pointer}
+  input,select{font-family:var(--body);font-size:14px;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);width:100%;outline:none}
+  input:focus,select:focus{border-color:var(--coral-deep)}
+  label{font-size:12px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px}
+  .btn{background:var(--text);color:var(--bg);border:none;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:600;transition:transform .15s}
+  .btn:hover{transform:translateY(-2px)}
+  .btn-ghost{background:transparent;color:var(--text);border:1.5px solid var(--text)}
+  .btn-ghost:hover{color:var(--coral-deep);border-color:var(--coral-deep)}
+  .btn-liten{padding:5px 12px;font-size:12px}
+  .kort{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:22px;margin-bottom:18px}
+  .melding{padding:10px 14px;border-radius:8px;margin:10px 0;font-size:14px;display:none}
+  .melding.ok{display:block;background:#EAF6EC;color:#2d6a4f}
+  .melding.feil{display:block;background:#FDECEA;color:#B3261E;white-space:pre-wrap;word-break:break-word}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);text-align:left;padding:8px 10px;border-bottom:2px solid var(--border)}
+  td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+  tr:hover td{background:var(--bg2)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+  @media(max-width:720px){.grid2,.grid3{grid-template-columns:1fr}}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 10px;border-radius:99px;background:rgba(251,130,122,.15);color:var(--coral-deep)}
+  .pill.inaktiv{background:#eee;color:var(--dim)}
+  .senter{max-width:420px;margin:8vh auto;padding:0 16px}
+  .logo{font-family:var(--display);font-weight:700;font-size:22px;color:var(--coral-deep)}
+  header.app{display:flex;justify-content:space-between;align-items:center;background:var(--surface);border-bottom:1px solid var(--border);padding:14px 26px;position:sticky;top:0;z-index:5}
+  nav.faner{display:flex;gap:4px;flex-wrap:wrap;padding:14px 26px 0}
+  nav.faner button{background:transparent;border:none;border-bottom:3px solid transparent;padding:8px 16px;font-size:14.5px;font-weight:600;color:var(--dim);border-radius:0}
+  nav.faner button.aktiv{color:var(--text);border-bottom-color:var(--coral-deep)}
+  main{padding:20px 26px;max-width:1080px}
+  .verktoylinje{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:16px}
+  .verktoylinje>div{min-width:220px}
+  .hjelpetekst{font-size:12.5px;color:var(--dim);margin-top:6px}
+</style>
+</head>
+<body>
+
+<!-- INNLOGGING -->
+<div id="view-login" class="senter" hidden>
+  <div class="kort">
+    <div class="logo" style="margin-bottom:4px">Nora AI</div>
+    <h2 style="margin-bottom:18px">Adminpanel — logg inn</h2>
+    <div style="margin-bottom:12px"><label>E-post</label><input id="inn-epost" type="email" autocomplete="username"></div>
+    <div style="margin-bottom:16px"><label>Passord</label><input id="inn-passord" type="password" autocomplete="current-password"></div>
+    <button class="btn" style="width:100%" onclick="loggInn()">→ Logg inn</button>
+    <div style="text-align:center;margin-top:12px"><a href="#" onclick="glemtPassord();return false" style="color:var(--coral-deep);font-size:13.5px">Glemt passord?</a></div>
+    <div id="inn-melding" class="melding"></div>
+  </div>
+</div>
+
+<!-- SETT PASSORD (invitasjon / tilbakestilling) -->
+<div id="view-passord" class="senter" hidden>
+  <div class="kort">
+    <div class="logo" style="margin-bottom:4px">Nora AI</div>
+    <h2 style="margin-bottom:6px">Velkommen — sett passordet ditt</h2>
+    <p class="hjelpetekst" style="margin-bottom:16px">Minst 8 tegn.</p>
+    <div style="margin-bottom:12px"><label>Nytt passord</label><input id="pw1" type="password" autocomplete="new-password"></div>
+    <div style="margin-bottom:16px"><label>Gjenta passord</label><input id="pw2" type="password" autocomplete="new-password"></div>
+    <button class="btn" style="width:100%" onclick="settPassord()">Lagre passord og logg inn</button>
+    <div id="pw-melding" class="melding"></div>
+  </div>
+</div>
+
+<!-- HOVEDPANEL -->
+<div id="view-app" hidden>
+  <header class="app">
+    <div><span class="logo">Nora AI</span> <span style="font-family:var(--mono);font-size:12px;color:var(--dim);margin-left:8px">ADMINPANEL</span></div>
+    <div style="display:flex;gap:14px;align-items:center">
+      <span id="hvem" style="font-size:13px;color:var(--dim)"></span>
+      <button class="btn btn-ghost btn-liten" onclick="loggUt()">Logg ut</button>
+    </div>
+  </header>
+  <nav class="faner" id="faner"></nav>
+  <main>
+    <div class="verktoylinje" id="kundevelger-rad" hidden>
+      <div><label>Kunde</label><select id="kundevelger" onchange="byttKunde()"></select></div>
+    </div>
+    <div id="app-melding" class="melding"></div>
+    <section id="fane-kunder" hidden>
+      <div class="kort">
+        <h3 style="margin-bottom:12px">Ny kunde</h3>
+        <div class="grid3" style="align-items:end">
+          <div><label>Selskapsnavn *</label><input id="ny-kunde-navn"></div>
+          <div><label>Org.nr</label><input id="ny-kunde-orgnr"></div>
+          <div><button class="btn" onclick="opprettKunde()">+ Opprett kunde</button></div>
+        </div>
+        <p class="hjelpetekst">Standardinnstillinger (30 % dekning, min 20/maks 50) opprettes automatisk.</p>
+      </div>
+      <div class="kort"><h3 style="margin-bottom:12px">Kunder</h3><div id="kunde-liste"></div></div>
+    </section>
+    <section id="fane-brukere" hidden>
+      <div class="kort">
+        <h3 style="margin-bottom:12px">Inviter ny bruker</h3>
+        <div class="grid3">
+          <div><label>Fornavn *</label><input id="ny-fornavn"></div>
+          <div><label>Etternavn *</label><input id="ny-etternavn"></div>
+          <div><label>E-post *</label><input id="ny-epost" type="email"></div>
+          <div><label>Mobil</label><input id="ny-mobil"></div>
+          <div><label>Rolle *</label><select id="ny-rolle">
+            <option value="bruker">Bruker (selger)</option>
+            <option value="kunde_admin">Kunde-admin</option>
+          </select></div>
+          <div style="align-self:end"><button class="btn" onclick="inviterBruker()">✉ Send invitasjon</button></div>
+        </div>
+        <p class="hjelpetekst">Brukeren får en e-post og setter passordet selv. Nora AI-admin oppretter brukere i kunden valgt øverst — eller Nora AI-ansatte via rollen «Nora AI-admin» (vises kun for deg).</p>
+      </div>
+      <div class="kort"><h3 style="margin-bottom:12px">Brukere</h3><div id="bruker-liste"></div></div>
+    </section>
+    <section id="fane-innstillinger" hidden>
+      <div class="kort">
+        <h3 style="margin-bottom:12px">Standardinnstillinger for kunden</h3>
+        <div class="grid3">
+          <div><label>Standard dekning %</label><input id="inst-dekning" type="number" step="0.1"></div>
+          <div><label>Min dekning %</label><input id="inst-min" type="number" step="0.1"></div>
+          <div><label>Maks dekning %</label><input id="inst-maks" type="number" step="0.1"></div>
+          <div><label>Standard faktorpåslag (valgfri)</label><input id="inst-faktor" type="number" step="0.0001" placeholder="beregnes av kurs/dekning hvis tom"></div>
+        </div>
+        <div style="margin-top:14px"><button class="btn" onclick="lagreInnstillinger()">Lagre innstillinger</button></div>
+        <p class="hjelpetekst">Gjelder alle selgere hos kunden ved nye tilbud. Selger kan justere per posisjon innenfor min/maks.</p>
+      </div>
+    </section>
+    <section id="fane-ordliste" hidden>
+      <div class="kort">
+        <h3 style="margin-bottom:12px">Legg til term</h3>
+        <div class="grid3" style="align-items:end">
+          <div><label>Engelsk *</label><input id="term-en"></div>
+          <div><label>Norsk *</label><input id="term-no"></div>
+          <div><label>Fabrikk (tom = alle)</label><select id="term-fabrikk">
+            <option value="">Alle fabrikker</option>
+            <option>HCTC</option><option>Aldens</option><option>Aliuminatas</option><option>Vitron</option><option>Aradas</option>
+          </select></div>
+          <div id="term-scope-rad" hidden><label>Gjelder</label><select id="term-scope">
+            <option value="global">Globalt (alle kunder)</option>
+            <option value="kunde">Kun valgt kunde</option>
+          </select></div>
+          <div><button class="btn" onclick="leggTilTerm()">+ Legg til</button></div>
+        </div>
+        <p class="hjelpetekst">Ordlisten legges automatisk inn i oversettelsen for hvert tilbud — alle selgere får identiske fagbegreper.</p>
+      </div>
+      <div class="kort"><h3 style="margin-bottom:12px">Ordliste</h3><div id="term-liste"></div></div>
+    </section>
+    <section id="fane-logg" hidden>
+      <div class="kort">
+        <div class="verktoylinje">
+          <div><label>Filtrer på tilbudsnr</label><input id="logg-filter" oninput="visLogg()"></div>
+        </div>
+        <div id="logg-liste"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const SB_URL = 'https://nykvylfvouwmoclraxqu.supabase.co';
+const SB_KEY = 'sb_publishable_x-8Q-9gRRnw144STE1QCwA_zHfrE9_P';
+const LAGER = 'nora_admin_sesjon';
+
+let sesjon = null, minProfil = null, valgtKunde = null, kunder = [], loggData = [];
+
+// ── Hjelpere ──────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+function vis(id){ ['view-login','view-passord','view-app'].forEach(v => $(v).hidden = v!==id); }
+function meld(id, tekst, type){ const el=$(id); el.textContent=tekst; el.className='melding '+(type||'ok'); if(type!=='feil') setTimeout(()=>{el.className='melding'},4000); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function jwtSub(t){ try{ return JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).sub; }catch{ return null; } }
+
+async function auth(path, body, token){
+  const r = await fetch(SB_URL+'/auth/v1'+path, {
+    method:'POST', headers:{apikey:SB_KEY,'Content-Type':'application/json', ...(token?{Authorization:'Bearer '+token}:{})},
+    body: JSON.stringify(body)
+  });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.msg || d.error_description || d.message || 'Ukjent feil ('+r.status+')');
+  return d;
+}
+
+async function gyldigSesjon(){
+  if(!sesjon) return null;
+  if(Date.now()/1000 < sesjon.expires_at - 60) return sesjon;
+  try{
+    const d = await auth('/token?grant_type=refresh_token', {refresh_token: sesjon.refresh_token});
+    settSesjon(d); return sesjon;
+  }catch{ loggUt(); return null; }
+}
+
+function settSesjon(d){
+  sesjon = {access_token:d.access_token, refresh_token:d.refresh_token, expires_at: Math.floor(Date.now()/1000)+(d.expires_in||3600)};
+  localStorage.setItem(LAGER, JSON.stringify(sesjon));
+}
+
+async function api(path, opts={}){
+  const s = await gyldigSesjon();
+  if(!s) throw new Error('Ikke innlogget');
+  const r = await fetch(SB_URL+path, {...opts, headers:{
+    apikey:SB_KEY, Authorization:'Bearer '+s.access_token, 'Content-Type':'application/json',
+    Prefer:'return=representation', ...(opts.headers||{})
+  }});
+  if(r.status===401){ loggUt(); throw new Error('Sesjonen er utløpt — logg inn på nytt'); }
+  if(!r.ok) throw new Error(await r.text());
+  const t = await r.text(); return t ? JSON.parse(t) : null;
+}
+
+// ── Innlogging / passord ──────────────────────────────────
+async function loggInn(){
+  try{
+    const d = await auth('/token?grant_type=password', {email:$('inn-epost').value.trim(), password:$('inn-passord').value});
+    settSesjon(d); await startApp();
+  }catch(e){ meld('inn-melding','Innlogging feilet: '+e.message,'feil'); }
+}
+
+async function glemtPassord(){
+  const epost = $('inn-epost').value.trim();
+  if(!epost) return meld('inn-melding','Skriv inn e-posten din først','feil');
+  try{
+    await auth('/recover', {email:epost, gotrue_meta_security:{}}, null);
+    meld('inn-melding','E-post med tilbakestillingslenke er sendt.');
+  }catch(e){ meld('inn-melding',e.message,'feil'); }
+}
+
+async function settPassord(){
+  const p1=$('pw1').value, p2=$('pw2').value;
+  if(p1.length<8) return meld('pw-melding','Passordet må ha minst 8 tegn','feil');
+  if(p1!==p2) return meld('pw-melding','Passordene er ikke like','feil');
+  try{
+    const r = await fetch(SB_URL+'/auth/v1/user', {method:'PUT',
+      headers:{apikey:SB_KEY, Authorization:'Bearer '+sesjon.access_token, 'Content-Type':'application/json'},
+      body: JSON.stringify({password:p1})});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.msg||d.message||'Kunne ikke sette passord');
+    history.replaceState(null,'',location.pathname);
+    await startApp();
+  }catch(e){ meld('pw-melding',e.message,'feil'); }
+}
+
+function loggUt(){ sesjon=null; minProfil=null; localStorage.removeItem(LAGER); vis('view-login'); }
+
+// ── Oppstart ──────────────────────────────────────────────
+async function startApp(){
+  const uid = jwtSub(sesjon.access_token);
+  const p = await api('/rest/v1/profiles?id=eq.'+uid+'&select=*');
+  minProfil = p && p[0];
+  if(!minProfil || !minProfil.aktiv){ meld('inn-melding','Ingen aktiv profil for denne brukeren','feil'); return loggUt(); }
+  if(minProfil.rolle==='bruker'){ meld('inn-melding','Adminpanelet krever admin-rolle. Bruk selve tilbudskalkulatoren.','feil'); return loggUt(); }
+  $('hvem').textContent = minProfil.epost+' · '+(minProfil.rolle==='nora_admin'?'Nora AI-admin':'Kunde-admin');
+  vis('view-app');
+
+  const erNora = minProfil.rolle==='nora_admin';
+  const faner = [...(erNora?[['kunder','Kunder']]:[]), ['brukere','Brukere'], ['innstillinger','Innstillinger'], ['ordliste','Ordliste'], ['logg','Endringslogg']];
+  $('faner').innerHTML = faner.map(([id,navn])=>'<button id="fane-btn-'+id+'" onclick="byttFane(\''+id+'\')">'+navn+'</button>').join('');
+  $('term-scope-rad').hidden = !erNora;
+  if(erNora){
+    const rolleSelect = $('ny-rolle');
+    rolleSelect.insertAdjacentHTML('beforeend','<option value="nora_admin">Nora AI-admin (ansatt hos Nora AI)</option>');
+    $('kundevelger-rad').hidden = false;
+    await lastKunder();
+  } else {
+    valgtKunde = minProfil.kunde_id;
+  }
+  byttFane(erNora?'kunder':'brukere');
+}
+
+async function lastKunder(){
+  kunder = await api('/rest/v1/kunder?select=*&order=navn');
+  const v = $('kundevelger');
+  v.innerHTML = kunder.map(k=>'<option value="'+k.id+'">'+esc(k.navn)+(k.aktiv?'':' (deaktivert)')+'</option>').join('');
+  if(!valgtKunde && kunder.length) valgtKunde = kunder[0].id;
+  if(valgtKunde) v.value = valgtKunde;
+}
+
+function byttKunde(){ valgtKunde = $('kundevelger').value; oppdaterAktivFane(); }
+
+let aktivFane = null;
+function byttFane(id){
+  aktivFane = id;
+  ['kunder','brukere','innstillinger','ordliste','logg'].forEach(f=>{
+    const s=$('fane-'+f), b=$('fane-btn-'+f);
+    if(s) s.hidden = f!==id;
+    if(b) b.classList.toggle('aktiv', f===id);
+  });
+  oppdaterAktivFane();
+}
+function oppdaterAktivFane(){
+  ({kunder:visKunder, brukere:visBrukere, innstillinger:visInnstillinger, ordliste:visOrdliste, logg:lastLogg})[aktivFane]?.();
+}
+
+// ── Kunder (kun nora_admin) ───────────────────────────────
+async function visKunder(){
+  await lastKunder();
+  $('kunde-liste').innerHTML = '<table><tr><th>Navn</th><th>Org.nr</th><th>Fabrikker</th><th>Status</th><th></th></tr>'+
+    kunder.map(k=>'<tr><td><strong>'+esc(k.navn)+'</strong></td><td>'+esc(k.orgnr||'—')+'</td><td style="font-family:var(--mono);font-size:12px">'+esc((k.aktive_fabrikker||[]).join(', '))+'</td>'+
+      '<td><span class="pill'+(k.aktiv?'':' inaktiv')+'">'+(k.aktiv?'aktiv':'deaktivert')+'</span></td>'+
+      '<td><button class="btn btn-ghost btn-liten" onclick="toggleKunde(\''+k.id+'\','+(!k.aktiv)+')">'+(k.aktiv?'Deaktiver':'Aktiver')+'</button></td></tr>').join('')+'</table>';
+}
+async function opprettKunde(){
+  const navn=$('ny-kunde-navn').value.trim(), orgnr=$('ny-kunde-orgnr').value.trim();
+  if(!navn) return meld('app-melding','Selskapsnavn er påkrevd','feil');
+  try{
+    const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({action:'opprett_kunde', navn, orgnr:orgnr||null})});
+    if(r.error) throw new Error(r.error);
+    $('ny-kunde-navn').value=''; $('ny-kunde-orgnr').value='';
+    meld('app-melding','Kunden «'+navn+'» er opprettet med standardinnstillinger.');
+    valgtKunde = r.kunde.id; await visKunder();
+  }catch(e){ meld('app-melding',e.message,'feil'); }
+}
+async function toggleKunde(id, aktiv){
+  try{ await api('/rest/v1/kunder?id=eq.'+id, {method:'PATCH', body:JSON.stringify({aktiv})}); await visKunder(); }
+  catch(e){ meld('app-melding',e.message,'feil'); }
+}
+
+// ── Brukere ───────────────────────────────────────────────
+async function visBrukere(){
+  const erNora = minProfil.rolle==='nora_admin';
+  const filter = erNora ? 'or=(kunde_id.eq.'+valgtKunde+',kunde_id.is.null)' : 'kunde_id=eq.'+valgtKunde;
+  const brukere = await api('/rest/v1/profiles?select=*&'+filter+'&order=etternavn');
+  $('bruker-liste').innerHTML = '<table><tr><th>Navn</th><th>E-post</th><th>Mobil</th><th>Rolle</th><th>Tilhørighet</th><th>Status</th><th></th></tr>'+
+    brukere.map(b=>{
+      const rolleNavn = {bruker:'Bruker', kunde_admin:'Kunde-admin', nora_admin:'Nora AI-admin'}[b.rolle]||b.rolle;
+      const kunde = b.kunde_id ? (kunder.find(k=>k.id===b.kunde_id)?.navn || 'Kunde') : 'Nora AI';
+      return '<tr><td><strong>'+esc((b.fornavn+' '+b.etternavn).trim()||b.navn)+'</strong></td><td>'+esc(b.epost)+'</td><td>'+esc(b.mobil||'—')+'</td>'+
+      '<td>'+rolleNavn+'</td><td>'+esc(kunde)+'</td><td><span class="pill'+(b.aktiv?'':' inaktiv')+'">'+(b.aktiv?'aktiv':'deaktivert')+'</span></td>'+
+      '<td>'+(b.id===minProfil.id?'':'<button class="btn btn-ghost btn-liten" onclick="toggleBruker(\''+b.id+'\','+(!b.aktiv)+')">'+(b.aktiv?'Deaktiver':'Aktiver')+'</button>')+'</td></tr>';
+    }).join('')+'</table>';
+}
+async function inviterBruker(){
+  const fornavn=$('ny-fornavn').value.trim(), etternavn=$('ny-etternavn').value.trim(),
+        epost=$('ny-epost').value.trim(), mobil=$('ny-mobil').value.trim(), rolle=$('ny-rolle').value;
+  if(!fornavn||!etternavn||!epost) return meld('app-melding','Fornavn, etternavn og e-post er påkrevd','feil');
+  try{
+    const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({
+      action:'opprett_bruker', epost, fornavn, etternavn, mobil:mobil||null, rolle,
+      kunde_id: rolle==='nora_admin' ? null : valgtKunde
+    })});
+    if(r.error) throw new Error(r.error);
+    ['ny-fornavn','ny-etternavn','ny-epost','ny-mobil'].forEach(i=>$(i).value='');
+    meld('app-melding','Invitasjon sendt til '+epost+'.');
+    await visBrukere();
+  }catch(e){ meld('app-melding',e.message,'feil'); }
+}
+async function toggleBruker(id, aktiv){
+  try{ await api('/rest/v1/profiles?id=eq.'+id, {method:'PATCH', body:JSON.stringify({aktiv})}); await visBrukere(); }
+  catch(e){ meld('app-melding',e.message,'feil'); }
+}
+
+// ── Innstillinger ─────────────────────────────────────────
+async function visInnstillinger(){
+  const d = await api('/rest/v1/innstillinger?kunde_id=eq.'+valgtKunde+'&select=*');
+  const i = d && d[0];
+  if(!i) return meld('app-melding','Fant ingen innstillinger for valgt kunde','feil');
+  $('inst-dekning').value=i.dekning_prosent; $('inst-min').value=i.dekning_min;
+  $('inst-maks').value=i.dekning_maks; $('inst-faktor').value=i.standard_faktor??'';
+}
+async function lagreInnstillinger(){
+  const b = {dekning_prosent:+$('inst-dekning').value, dekning_min:+$('inst-min').value,
+             dekning_maks:+$('inst-maks').value, standard_faktor: $('inst-faktor').value===''?null:+$('inst-faktor').value,
+             oppdatert_av: minProfil.id, oppdatert: new Date().toISOString()};
+  if(b.dekning_min>b.dekning_prosent||b.dekning_prosent>b.dekning_maks) return meld('app-melding','Krav: min ≤ standard ≤ maks','feil');
+  try{
+    await api('/rest/v1/innstillinger?kunde_id=eq.'+valgtKunde, {method:'PATCH', body:JSON.stringify(b)});
+    meld('app-melding','Innstillinger lagret — gjelder alle selgere hos kunden.');
+  }catch(e){ meld('app-melding',e.message,'feil'); }
+}
+
+// ── Ordliste ──────────────────────────────────────────────
+async function visOrdliste(){
+  const termer = await api('/rest/v1/terminologi?select=*&or=(kunde_id.is.null,kunde_id.eq.'+valgtKunde+')&order=engelsk');
+  const erNora = minProfil.rolle==='nora_admin';
+  $('term-liste').innerHTML = '<table><tr><th>Engelsk</th><th>Norsk</th><th>Fabrikk</th><th>Gjelder</th><th></th></tr>'+
+    termer.map(t=>{
+      const kanSlette = erNora || t.kunde_id;
+      return '<tr><td>'+esc(t.engelsk)+'</td><td><strong>'+esc(t.norsk)+'</strong></td><td>'+esc(t.fabrikk||'alle')+'</td>'+
+      '<td>'+(t.kunde_id?'denne kunden':'globalt')+'</td>'+
+      '<td>'+(kanSlette?'<button class="btn btn-ghost btn-liten" onclick="slettTerm('+t.id+')">Slett</button>':'')+'</td></tr>';
+    }).join('')+'</table>';
+}
+async function leggTilTerm(){
+  const engelsk=$('term-en').value.trim(), norsk=$('term-no').value.trim(), fabrikk=$('term-fabrikk').value||null;
+  if(!engelsk||!norsk) return meld('app-melding','Både engelsk og norsk er påkrevd','feil');
+  const erNora = minProfil.rolle==='nora_admin';
+  const kunde_id = (erNora && $('term-scope').value==='global') ? null : valgtKunde;
+  try{
+    await api('/rest/v1/terminologi', {method:'POST', body:JSON.stringify({engelsk, norsk, fabrikk, kunde_id})});
+    $('term-en').value=''; $('term-no').value='';
+    meld('app-melding','Term lagt til.'); await visOrdliste();
+  }catch(e){ meld('app-melding',e.message,'feil'); }
+}
+async function slettTerm(id){
+  try{ await api('/rest/v1/terminologi?id=eq.'+id, {method:'DELETE'}); await visOrdliste(); }
+  catch(e){ meld('app-melding',e.message,'feil'); }
+}
+
+// ── Endringslogg ──────────────────────────────────────────
+async function lastLogg(){
+  loggData = await api('/rest/v1/endringslogg?select=*&kunde_id=eq.'+valgtKunde+'&order=tidspunkt.desc&limit=300');
+  visLogg();
+}
+function visLogg(){
+  const f = $('logg-filter').value.trim().toLowerCase();
+  const rader = loggData.filter(r=>!f || (r.tilbudsnr||'').toLowerCase().includes(f));
+  $('logg-liste').innerHTML = rader.length ?
+    '<table><tr><th>Tidspunkt</th><th>Selger</th><th>Tilbud</th><th>Pos.</th><th>Felt</th><th>Fra</th><th>Til</th></tr>'+
+    rader.map(r=>'<tr><td style="font-family:var(--mono);font-size:12px">'+new Date(r.tidspunkt).toLocaleString('nb-NO')+'</td>'+
+      '<td>'+esc(r.selger_epost)+'</td><td>'+esc(r.tilbudsnr||'—')+'</td><td>'+(r.posisjonsnr??'—')+'</td>'+
+      '<td><strong>'+esc(r.felt_endret)+'</strong></td><td>'+esc(r.gammel_verdi||'—')+'</td><td>'+esc(r.ny_verdi||'—')+'</td></tr>').join('')+'</table>'
+    : '<p class="hjelpetekst">Ingen loggførte endringer'+(f?' som matcher filteret':'')+' ennå.</p>';
+}
+
+// ── Init ──────────────────────────────────────────────────
+(async function(){
+  // Invitasjons-/recovery-lenke? Tokens ligger i URL-hash
+  const hash = new URLSearchParams(location.hash.slice(1));
+  if(hash.get('access_token') && ['invite','recovery','signup'].includes(hash.get('type'))){
+    sesjon = {access_token:hash.get('access_token'), refresh_token:hash.get('refresh_token'),
+              expires_at: Math.floor(Date.now()/1000)+3600};
+    localStorage.setItem(LAGER, JSON.stringify(sesjon));
+    return vis('view-passord');
+  }
+  if(hash.get('error_description')){
+    vis('view-login');
+    return meld('inn-melding', decodeURIComponent(hash.get('error_description').replace(/\+/g,' ')), 'feil');
+  }
+  const lagret = localStorage.getItem(LAGER);
+  if(lagret){
+    sesjon = JSON.parse(lagret);
+    try{ if(await gyldigSesjon()) return await startApp(); }catch{}
+  }
+  vis('view-login');
+})();
+</script>
+</body>
+</html>
