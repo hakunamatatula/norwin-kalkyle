@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v9"/>
+<meta name="app-version" content="admin-2026-07-04-v10"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -163,9 +163,6 @@
         <div class="grid3" style="align-items:end">
           <div><label>Engelsk *</label><input id="term-en"></div>
           <div><label>Norsk *</label><input id="term-no"></div>
-          <div><label>Fabrikk (tom = alle)</label><select id="term-fabrikk">
-            <option value="">Alle fabrikker</option>
-          </select></div>
           <div id="term-scope-rad" hidden><label>Gjelder</label><select id="term-scope" onchange="visOrdliste()">
             <option value="kunde">Kun valgt kunde</option>
             <option value="global">Globalt (alle kunder)</option>
@@ -472,30 +469,23 @@ async function lagreInnstillinger(){
 async function visOrdliste(){
   const termer = await api('/rest/v1/terminologi?select=*&or=(kunde_id.is.null,kunde_id.eq.'+valgtKunde+')&order=engelsk');
   const erNora = minProfil.rolle==='nora_admin';
-  // Fabrikk her er en oversettelses-tag (hvilket fabrikkformat termen gjelder), ikke kundekonfigurasjon
-  if(!$('term-fabrikk').options.length || $('term-fabrikk').options.length===1){
-    $('term-fabrikk').innerHTML = '<option value="">Alle fabrikker</option>'+FABRIKKER.map(f=>'<option>'+f+'</option>').join('');
-  }
   const kNavn = (kunder.find(k=>k.id===valgtKunde)||{}).navn || minKundeNavn || 'valgt kunde';
   const rad = (t, kanEndre) => {
     if (redigererTermId === t.id) {
-      const fabValg = ['<option value=""'+(t.fabrikk?'':' selected')+'>Alle fabrikker</option>']
-        .concat(FABRIKKER.map(f=>'<option'+(t.fabrikk===f?' selected':'')+'>'+f+'</option>')).join('');
       return '<tr style="background:var(--bg)">'+
         '<td><input id="red-en-'+t.id+'" value="'+esc(t.engelsk)+'"></td>'+
         '<td><input id="red-no-'+t.id+'" value="'+esc(t.norsk)+'"></td>'+
-        '<td><select id="red-fab-'+t.id+'">'+fabValg+'</select></td>'+
         '<td style="white-space:nowrap"><button class="btn btn-liten" onclick="lagreTerm('+t.id+')">Lagre</button> '+
         '<button class="btn btn-ghost btn-liten" onclick="redigererTermId=null;visOrdliste()">Avbryt</button></td></tr>';
     }
-    return '<tr><td>'+esc(t.engelsk)+'</td><td><strong>'+esc(t.norsk)+'</strong></td><td>'+esc(t.fabrikk||'alle')+'</td>'+
+    return '<tr><td>'+esc(t.engelsk)+'</td><td><strong>'+esc(t.norsk)+'</strong></td>'+
       '<td style="white-space:nowrap">'+(kanEndre
         ? '<button class="btn btn-ghost btn-liten" onclick="redigererTermId='+t.id+';visOrdliste()">Endre</button> '+
           '<button class="btn btn-ghost btn-liten" onclick="slettTerm('+t.id+')">Slett</button>'
         : '')+'</td></tr>';
   };
   const tabell = (liste, kanEndre) => liste.length
-    ? '<table><tr><th>Engelsk</th><th>Norsk</th><th>Fabrikk</th><th></th></tr>'+liste.map(t=>rad(t, kanEndre)).join('')+'</table>'
+    ? '<table><tr><th>Engelsk</th><th>Norsk</th><th></th></tr>'+liste.map(t=>rad(t, kanEndre)).join('')+'</table>'
     : '<p class="hjelpetekst">Ingen termer ennå.</p>';
   const kundens = termer.filter(t=>t.kunde_id);
   const globale = termer.filter(t=>!t.kunde_id);
@@ -515,22 +505,22 @@ async function visOrdliste(){
     seksjon('global', 'Global ordliste (Nora AI)', 'Felles fagterminologi for alle kunder. Kun Nora AI-admin kan endre den.', globale, erNora);
 }
 async function lagreTerm(id){
-  const engelsk = $('red-en-'+id).value.trim(), norsk = $('red-no-'+id).value.trim(), fabrikk = $('red-fab-'+id).value || null;
+  const engelsk = $('red-en-'+id).value.trim(), norsk = $('red-no-'+id).value.trim();
   if(!engelsk || !norsk) return meld('app-melding','B\u00e5de engelsk og norsk m\u00e5 fylles ut','feil');
   try{
-    await api('/rest/v1/terminologi?id=eq.'+id, {method:'PATCH', body:JSON.stringify({engelsk, norsk, fabrikk})});
+    await api('/rest/v1/terminologi?id=eq.'+id, {method:'PATCH', body:JSON.stringify({engelsk, norsk, fabrikk:null})});
     redigererTermId = null;
     meld('app-melding','Term oppdatert \u2014 gjelder alle nye tilbud umiddelbart.');
     await visOrdliste();
   }catch(e){ meld('app-melding',e.message,'feil'); }
 }
 async function leggTilTerm(){
-  const engelsk=$('term-en').value.trim(), norsk=$('term-no').value.trim(), fabrikk=$('term-fabrikk').value||null;
+  const engelsk=$('term-en').value.trim(), norsk=$('term-no').value.trim();
   if(!engelsk||!norsk) return meld('app-melding','Både engelsk og norsk er påkrevd','feil');
   const erNora = minProfil.rolle==='nora_admin';
   const kunde_id = (erNora && $('term-scope').value==='global') ? null : valgtKunde;
   try{
-    await api('/rest/v1/terminologi', {method:'POST', body:JSON.stringify({engelsk, norsk, fabrikk, kunde_id})});
+    await api('/rest/v1/terminologi', {method:'POST', body:JSON.stringify({engelsk, norsk, kunde_id})});
     $('term-en').value=''; $('term-no').value='';
     meld('app-melding','Term lagt til.'); await visOrdliste();
   }catch(e){ meld('app-melding',e.message,'feil'); }
