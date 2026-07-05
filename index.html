@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="2026-07-04-v41"/>
+<meta name="app-version" content="2026-07-04-v42"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
@@ -732,8 +732,9 @@
       const kid = ((await pr.json())[0] || {}).kunde_id || null;
 
       if (kid) {
-        const kr = await fetch(SB_URL + '/rest/v1/kunder?id=eq.' + kid + '&select=navn,logo_url', { headers: hdr });
+        const kr = await fetch(SB_URL + '/rest/v1/kunder?id=eq.' + kid + '&select=navn,logo_url,aktiv', { headers: hdr });
         const k = (await kr.json())[0] || {};
+        if (k.aktiv === false) return false; // selskapet er deaktivert
         KUNDE_PROFIL.navn = k.navn || '';
         if (k.logo_url) localStorage.setItem('norwin_kalk_logo', k.logo_url);
         else localStorage.removeItem('norwin_kalk_logo');
@@ -4861,11 +4862,18 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
     try {
       const uid = JSON.parse(atob(d.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub;
-      const pr  = await fetch(SB_URL + '/rest/v1/profiles?id=eq.' + uid + '&select=rolle,aktiv', {
+      const pr  = await fetch(SB_URL + '/rest/v1/profiles?id=eq.' + uid + '&select=rolle,aktiv,kunde_id', {
         headers: { apikey: SB_KEY, Authorization: 'Bearer ' + d.access_token }
       });
       const prof = (await pr.json())[0];
       if (prof && prof.aktiv === false) { errEl.textContent = 'Brukeren er deaktivert. Kontakt administrator.'; return; }
+      if (prof && prof.kunde_id) {
+        const krs = await fetch(SB_URL + '/rest/v1/kunder?id=eq.' + prof.kunde_id + '&select=aktiv', {
+          headers: { apikey: SB_KEY, Authorization: 'Bearer ' + d.access_token }
+        });
+        const ku = (await krs.json())[0];
+        if (!ku || ku.aktiv === false) { errEl.textContent = 'Selskapet er deaktivert. Kontakt Nora AI.'; return; }
+      }
       const map = { nora_admin: 'admin', kunde_admin: 'kunde-admin', bruker: 'bruker' };
       if (prof) NORA_SESJON.rolle = map[prof.rolle] || 'bruker';
     } catch(e) { /* rolle-oppslag feilet — fortsett som vanlig bruker */ }
@@ -4959,11 +4967,19 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       } catch(e) {}
     }
     if (token && NORA_SESJON && NORA_SESJON.epost) {
+      const kontekstOk = await synkKundeKontekst();
+      if (kontekstOk === false) {
+        slettSession();
+        if (overlay) { overlay.style.display = 'flex'; overlay.classList.add('show'); }
+        const errEl = document.getElementById('login-error');
+        if (errEl) errEl.textContent = 'Selskapet er deaktivert. Kontakt Nora AI.';
+        oppdaterAdminKnapp(null);
+        return;
+      }
       if (overlay) { overlay.style.display = 'none'; overlay.classList.remove('show'); }
       oppdaterAdminKnapp(NORA_SESJON.rolle || 'bruker');
       const innloggetEl = document.getElementById('innlogget-info');
       if (innloggetEl) innloggetEl.textContent = `${NORA_SESJON.epost} (${NORA_SESJON.rolle || 'bruker'})`;
-      await synkKundeKontekst();
       oppdaterLogoPreview();
       return;
     }

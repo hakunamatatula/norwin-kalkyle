@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v11"/>
+<meta name="app-version" content="admin-2026-07-04-v12"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -306,7 +306,8 @@ async function settPassord(){
     const d = await r.json();
     if(!r.ok) throw new Error(d.msg||d.message||'Kunne ikke sette passord');
     history.replaceState(null,'',location.pathname);
-    await startApp();
+    // Brukerne skal lande i Tilbudskalkulatoren — adminpanelet nås derfra ved behov
+    location.replace('./');
   }catch(e){ meld('pw-melding',e.message,'feil'); }
 }
 
@@ -318,6 +319,10 @@ async function startApp(){
   const p = await api('/rest/v1/profiles?id=eq.'+uid+'&select=*');
   minProfil = p && p[0];
   if(!minProfil || !minProfil.aktiv){ meld('inn-melding','Ingen aktiv profil for denne brukeren','feil'); return loggUt(); }
+  if(minProfil.kunde_id){
+    const kk = await api('/rest/v1/kunder?id=eq.'+minProfil.kunde_id+'&select=aktiv');
+    if(!kk || !kk[0] || kk[0].aktiv===false){ meld('inn-melding','Selskapet er deaktivert. Kontakt Nora AI.','feil'); return loggUt(); }
+  }
   if(minProfil.rolle==='bruker'){ meld('inn-melding','Adminpanelet krever admin-rolle. Bruk selve tilbudskalkulatoren.','feil'); return loggUt(); }
   $('hvem').textContent = minProfil.epost+' · '+(minProfil.rolle==='nora_admin'?'Nora AI-admin':'Kunde-admin');
   // Del epost/rolle med kalkulatoren (SSO) — den bruker 'admin'/'kunde-admin'/'bruker'
