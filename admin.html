@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v10"/>
+<meta name="app-version" content="admin-2026-07-04-v11"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -204,7 +204,25 @@ const SB_KEY = 'sb_publishable_x-8Q-9gRRnw144STE1QCwA_zHfrE9_P';
 const LAGER = 'nora_sesjon'; // delt med kalkulatoren (index.html) — én innlogging gjelder begge
 
 let sesjon = null, minProfil = null, valgtKunde = null, kunder = [], loggData = [], redigererFabrikkerFor = null, minKundeNavn = '';
-let redigererTermId = null, ordlisteApen = { kunde: true, global: false };
+let redigererTermId = null, ordlisteApen = { kunde: true, global: false }, redigererBrukerId = null;
+
+// Auto-høyde til omsluttende iframe (noraai.no) — samme mekanisme som kalkulatoren,
+// slik at hele panelet er tilgjengelig uten avkutting når det åpnes i iframe.
+(function(){
+  let sist = 0;
+  function meldHoyde(){
+    try{
+      if (window.parent === window) return;
+      const h = document.body.scrollHeight;
+      if (Math.abs(h - sist) < 4) return;
+      sist = h;
+      window.parent.postMessage({ noraKalkHoyde: h }, '*');
+    }catch(e){}
+  }
+  try{ new ResizeObserver(meldHoyde).observe(document.body); }catch(e){}
+  window.addEventListener('load', meldHoyde);
+  setInterval(meldHoyde, 1500);
+})();
 const FABRIKKER = ['HCTC','Aldens','Aliuminatas','Vitron','Aradas'];
 function fabrikkBokser(klasse, valgte){
   return FABRIKKER.map(f =>
@@ -419,12 +437,53 @@ async function visBrukere(){
   const brukere = await api('/rest/v1/profiles?select=*&'+filter+'&order=etternavn');
   $('bruker-liste').innerHTML = '<table><tr><th>Navn</th><th>E-post</th><th>Mobil</th><th>Rolle</th><th>Tilhørighet</th><th>Status</th><th></th></tr>'+
     brukere.map(b=>{
+      const kanRedigere = b.id!==minProfil.id && (erNora || b.rolle!=='nora_admin');
+      if (redigererBrukerId===b.id) {
+        const roller = [['bruker','Bruker'],['kunde_admin','Kunde-admin']].concat(erNora?[['nora_admin','Nora AI-admin']]:[]);
+        const rolleValg = roller.map(r=>'<option value="'+r[0]+'"'+(b.rolle===r[0]?' selected':'')+'>'+r[1]+'</option>').join('');
+        return '<tr style="background:var(--bg)">'+
+        '<td><input id="rb-fornavn-'+b.id+'" value="'+esc(b.fornavn||'')+'" placeholder="Fornavn" style="margin-bottom:4px"><input id="rb-etternavn-'+b.id+'" value="'+esc(b.etternavn||'')+'" placeholder="Etternavn"></td>'+
+        '<td><input id="rb-epost-'+b.id+'" type="email" value="'+esc(b.epost)+'"></td>'+
+        '<td><input id="rb-mobil-'+b.id+'" value="'+esc(b.mobil||'')+'"></td>'+
+        '<td><select id="rb-rolle-'+b.id+'">'+rolleValg+'</select></td>'+
+        '<td>'+esc(b.kunde_id ? (kunder.find(k=>k.id===b.kunde_id)?.navn || 'Kunde') : 'Nora AI')+'</td>'+
+        '<td><span class="pill'+(b.aktiv?'':' inaktiv')+'">'+(b.aktiv?'aktiv':'deaktivert')+'</span></td>'+
+        '<td style="white-space:nowrap"><button class="btn btn-liten" onclick="lagreBruker(\''+b.id+'\')">Lagre</button> '+
+        '<button class="btn btn-ghost btn-liten" onclick="redigererBrukerId=null;visBrukere()">Avbryt</button></td></tr>';
+      }
       const rolleNavn = {bruker:'Bruker', kunde_admin:'Kunde-admin', nora_admin:'Nora AI-admin'}[b.rolle]||b.rolle;
       const kunde = b.kunde_id ? (kunder.find(k=>k.id===b.kunde_id)?.navn || 'Kunde') : 'Nora AI';
       return '<tr><td><strong>'+esc((b.fornavn+' '+b.etternavn).trim()||b.navn)+'</strong></td><td>'+esc(b.epost)+'</td><td>'+esc(b.mobil||'—')+'</td>'+
       '<td>'+rolleNavn+'</td><td>'+esc(kunde)+'</td><td><span class="pill'+(b.aktiv?'':' inaktiv')+'">'+(b.aktiv?'aktiv':'deaktivert')+'</span></td>'+
-      '<td>'+(b.id===minProfil.id?'':'<button class="btn btn-ghost btn-liten" onclick="toggleBruker(\''+b.id+'\','+(!b.aktiv)+')">'+(b.aktiv?'Deaktiver':'Aktiver')+'</button>')+'</td></tr>';
-    }).join('')+'</table>';
+      '<td style="white-space:nowrap">'+(kanRedigere
+        ? '<button class="btn btn-ghost btn-liten" onclick="redigererBrukerId=\''+b.id+'\';visBrukere()">Endre</button> '+
+          '<button class="btn btn-ghost btn-liten" onclick="toggleBruker(\''+b.id+'\','+(!b.aktiv)+')">'+(b.aktiv?'Deaktiver':'Aktiver')+'</button> '+
+          '<button class="btn btn-ghost btn-liten" style="color:#B3261E;border-color:#B3261E" onclick="slettBruker(\''+b.id+'\',\''+esc(b.epost)+'\')">Slett</button>'
+        : '')+'</td></tr>';
+    }).join('')+'</table>'+
+    '<p class="hjelpetekst" style="margin-top:8px">Sletting er kun mulig for brukere uten historikk i endringsloggen (sporbarhetskrav). Brukere med historikk deaktiveres i stedet.</p>';
+}
+async function lagreBruker(id){
+  try{
+    const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({
+      action:'endre_bruker', bruker_id:id,
+      fornavn:$('rb-fornavn-'+id).value.trim(), etternavn:$('rb-etternavn-'+id).value.trim(),
+      epost:$('rb-epost-'+id).value.trim(), mobil:$('rb-mobil-'+id).value.trim(), rolle:$('rb-rolle-'+id).value
+    })});
+    if(r.error) throw new Error(r.error);
+    redigererBrukerId = null;
+    meld('app-melding','Bruker oppdatert.');
+    await visBrukere();
+  }catch(e){ meld('app-melding',e.message,'feil'); }
+}
+async function slettBruker(id, epost){
+  if(!confirm('Slette brukeren '+epost+' permanent? Dette kan ikke angres.')) return;
+  try{
+    const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({action:'slett_bruker', bruker_id:id})});
+    if(r.error) throw new Error(r.error);
+    meld('app-melding','Brukeren '+epost+' er slettet.');
+    await visBrukere();
+  }catch(e){ meld('app-melding',e.message,'feil'); }
 }
 async function inviterBruker(){
   const fornavn=$('ny-fornavn').value.trim(), etternavn=$('ny-etternavn').value.trim(),
