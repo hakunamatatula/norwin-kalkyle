@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v14"/>
+<meta name="app-version" content="admin-2026-07-04-v15"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -94,7 +94,12 @@
   <main>
     <div id="kunde-banner" hidden style="display:flex;justify-content:space-between;align-items:center;background:rgba(251,130,122,.12);border:1px solid var(--coral);border-radius:8px;padding:10px 16px;margin-bottom:16px">
       <div>Du administrerer: <strong id="kunde-banner-navn"></strong></div>
-      <button class="btn btn-ghost btn-liten" onclick="byttFane('kunder')">Bytt kunde</button>
+      <button class="btn btn-ghost btn-liten" onclick="valgtKunde=null;byttFane(aktivFane)">Bytt kunde</button>
+    </div>
+    <div id="velg-kunde-kort" class="kort" hidden>
+      <h3 style="margin-bottom:6px">Velg kunde</h3>
+      <p class="hjelpetekst" style="margin-bottom:12px">Denne fanen gjelder én kunde om gangen. Velg hvilken du vil administrere — valget gjelder alle kunde-fanene til du bytter.</p>
+      <div id="velg-kunde-liste"></div>
     </div>
     <div id="app-melding" class="melding"></div>
     <section id="fane-kunder" hidden>
@@ -360,23 +365,30 @@ function byttFane(id){
   aktivFane = id;
   const erNora = minProfil && minProfil.rolle==='nora_admin';
   const scopedeFaner = ['innstillinger','ordliste','logo','logg'];
+  // Nora-admin uten valgt kunde på en kunde-fane: vis «Velg kunde»-kortet i fanen.
+  // Alle faner er ALLTID synlige — ingenting dukker opp eller forsvinner.
+  const trengerValg = erNora && !valgtKunde && scopedeFaner.includes(id);
   ['kunder','brukere','innstillinger','ordliste','logo','logg'].forEach(f=>{
     const s=$('fane-'+f), b=$('fane-btn-'+f);
-    if(s) s.hidden = f!==id;
-    if(b){
-      b.classList.toggle('aktiv', f===id);
-      // Nora-admin: kunde-scopede faner vises først når en kunde er valgt via «Administrer»
-      b.style.display = (erNora && !valgtKunde && scopedeFaner.includes(f)) ? 'none' : '';
-    }
+    if(s) s.hidden = (f!==id) || trengerValg;
+    if(b) b.classList.toggle('aktiv', f===id);
   });
-  // Kontekst-banner: kun for Nora-admin på kunde-scopede faner. Kunde-admin ser aldri
+  $('velg-kunde-kort').hidden = !trengerValg;
+  if(trengerValg){
+    const aktive = kunder.filter(k=>k.aktiv);
+    $('velg-kunde-liste').innerHTML = aktive.length
+      ? aktive.map(k=>'<button class="btn btn-ghost" style="margin:0 8px 8px 0" onclick="velgKunde(\''+k.id+'\')">'+esc(k.navn)+'</button>').join('')
+      : '<p class="hjelpetekst">Ingen aktive kunder ennå — opprett en under Kunder-fanen.</p>';
+  }
+  // Banner med valgt kunde (kun Nora-admin på kunde-faner). Kunde-admin ser aldri
   // kundevalg eller kontekst-tekst — alt gjelder implisitt egen bedrift.
   const kNavn = (kunder.find(k=>k.id===valgtKunde)||{}).navn || '';
-  const visBanner = erNora && kNavn && scopedeFaner.includes(id);
+  const visBanner = erNora && kNavn && scopedeFaner.includes(id) && !trengerValg;
   $('kunde-banner').hidden = !visBanner;
   if(visBanner) $('kunde-banner-navn').textContent = kNavn;
-  oppdaterAktivFane();
+  if(!trengerValg) oppdaterAktivFane();
 }
+function velgKunde(id){ valgtKunde = id; byttFane(aktivFane); }
 function oppdaterAktivFane(){
   ({kunder:visKunder, brukere:visBrukere, innstillinger:visInnstillinger, ordliste:visOrdliste, logo:visLogo, logg:lastLogg})[aktivFane]?.();
 }
