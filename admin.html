@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v12"/>
+<meta name="app-version" content="admin-2026-07-04-v13"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -134,13 +134,14 @@
           <div><label>Etternavn *</label><input id="ny-etternavn"></div>
           <div><label>E-post *</label><input id="ny-epost" type="email"></div>
           <div><label>Mobil</label><input id="ny-mobil"></div>
-          <div><label>Rolle *</label><select id="ny-rolle">
+          <div><label>Rolle *</label><select id="ny-rolle" onchange="oppdaterKundevalgForBruker()">
             <option value="bruker">Bruker (selger)</option>
             <option value="kunde_admin">Kunde-admin</option>
           </select></div>
+          <div id="ny-bruker-kunde-rad" hidden><label>Kunde *</label><select id="ny-bruker-kunde"></select></div>
           <div style="align-self:end"><button class="btn" onclick="inviterBruker()">✉ Send invitasjon</button></div>
         </div>
-        <p class="hjelpetekst">Brukeren får en e-post og setter passordet selv. Nora AI-admin oppretter brukere i kunden valgt øverst — eller Nora AI-ansatte via rollen «Nora AI-admin» (vises kun for deg).</p>
+        <p class="hjelpetekst">Brukeren får en e-post og setter passordet selv, og lander rett i Tilbudskalkulatoren.</p>
       </div>
       <div class="kort"><h3 style="margin-bottom:12px">Brukere</h3><div id="bruker-liste"></div></div>
     </section>
@@ -367,13 +368,15 @@ function byttFane(id){
     if(s) s.hidden = f!==id;
     if(b) b.classList.toggle('aktiv', f===id);
   });
-  // Kontekst: kundevelger vises kun for Nora-admin på kunde-scopede faner
+  // Kundevelger: kun Nora-admin, og kun på kunde-scopede faner.
+  // Kunder-fanen er global liste; Brukere-fanen viser ALLE brukere for Nora-admin.
   const erNora = minProfil && minProfil.rolle==='nora_admin';
-  const scopet = id!=='kunder';
+  const scopet = !['kunder','brukere'].includes(id);
   $('kundevelger-rad').hidden = !(erNora && scopet);
   const kNavn = (kunder.find(k=>k.id===valgtKunde)||{}).navn || minKundeNavn || '';
-  $('kontekst-linje').hidden = !(scopet && kNavn);
-  $('kontekst-linje').innerHTML = scopet && kNavn ? 'Fanen gjelder kunden: <strong style="color:var(--text)">'+esc(kNavn)+'</strong>' : '';
+  const visKontekst = kNavn && (scopet || (id==='brukere' && !erNora));
+  $('kontekst-linje').hidden = !visKontekst;
+  $('kontekst-linje').innerHTML = visKontekst ? 'Fanen gjelder kunden: <strong style="color:var(--text)">'+esc(kNavn)+'</strong>' : '';
   oppdaterAktivFane();
 }
 function oppdaterAktivFane(){
@@ -436,10 +439,22 @@ async function toggleKunde(id, aktiv){
 }
 
 // ── Brukere ───────────────────────────────────────────────
+function oppdaterKundevalgForBruker(){
+  const erNora = minProfil && minProfil.rolle==='nora_admin';
+  const rad = $('ny-bruker-kunde-rad');
+  if(!rad) return;
+  const rolle = $('ny-rolle').value;
+  rad.hidden = !erNora || rolle==='nora_admin';
+  if(erNora && !$('ny-bruker-kunde').options.length){
+    $('ny-bruker-kunde').innerHTML = kunder.filter(k=>k.aktiv).map(k=>'<option value="'+k.id+'">'+esc(k.navn)+'</option>').join('');
+  }
+}
 async function visBrukere(){
   const erNora = minProfil.rolle==='nora_admin';
-  const filter = erNora ? 'or=(kunde_id.eq.'+valgtKunde+',kunde_id.is.null)' : 'kunde_id=eq.'+valgtKunde;
-  const brukere = await api('/rest/v1/profiles?select=*&'+filter+'&order=etternavn');
+  oppdaterKundevalgForBruker();
+  // Nora-admin ser ALLE brukere (tilhørighet vises per rad); kunde-admin ser kun egne
+  const filter = erNora ? '' : 'kunde_id=eq.'+valgtKunde+'&';
+  const brukere = await api('/rest/v1/profiles?select=*&'+filter+'order=etternavn');
   $('bruker-liste').innerHTML = '<table><tr><th>Navn</th><th>E-post</th><th>Mobil</th><th>Rolle</th><th>Tilhørighet</th><th>Status</th><th></th></tr>'+
     brukere.map(b=>{
       const kanRedigere = b.id!==minProfil.id && (erNora || b.rolle!=='nora_admin');
@@ -494,10 +509,16 @@ async function inviterBruker(){
   const fornavn=$('ny-fornavn').value.trim(), etternavn=$('ny-etternavn').value.trim(),
         epost=$('ny-epost').value.trim(), mobil=$('ny-mobil').value.trim(), rolle=$('ny-rolle').value;
   if(!fornavn||!etternavn||!epost) return meld('app-melding','Fornavn, etternavn og e-post er påkrevd','feil');
+  const erNora = minProfil.rolle==='nora_admin';
+  let kundeForBruker = valgtKunde;
+  if(erNora && rolle!=='nora_admin'){
+    kundeForBruker = $('ny-bruker-kunde').value;
+    if(!kundeForBruker) return meld('app-melding','Velg hvilken kunde brukeren skal tilhøre','feil');
+  }
   try{
     const r = await api('/functions/v1/admin-api', {method:'POST', body:JSON.stringify({
       action:'opprett_bruker', epost, fornavn, etternavn, mobil:mobil||null, rolle,
-      kunde_id: rolle==='nora_admin' ? null : valgtKunde
+      kunde_id: rolle==='nora_admin' ? null : kundeForBruker
     })});
     if(r.error) throw new Error(r.error);
     ['ny-fornavn','ny-etternavn','ny-epost','ny-mobil'].forEach(i=>$(i).value='');
