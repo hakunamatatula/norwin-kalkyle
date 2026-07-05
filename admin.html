@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v15"/>
+<meta name="app-version" content="admin-2026-07-05-v16"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -352,6 +352,11 @@ async function startApp(){
       minKundeNavn = (kd && kd[0] && kd[0].navn) || '';
     }catch(e){}
   }
+  // Hard sperre: kundevalg-elementene finnes ikke for andre enn Nora AI-admin
+  if(!erNora){
+    $('kunde-banner').remove();
+    $('velg-kunde-kort').remove();
+  }
   byttFane(erNora?'kunder':'brukere');
 }
 
@@ -373,19 +378,25 @@ function byttFane(id){
     if(s) s.hidden = (f!==id) || trengerValg;
     if(b) b.classList.toggle('aktiv', f===id);
   });
-  $('velg-kunde-kort').hidden = !trengerValg;
-  if(trengerValg){
-    const aktive = kunder.filter(k=>k.aktiv);
-    $('velg-kunde-liste').innerHTML = aktive.length
-      ? aktive.map(k=>'<button class="btn btn-ghost" style="margin:0 8px 8px 0" onclick="velgKunde(\''+k.id+'\')">'+esc(k.navn)+'</button>').join('')
-      : '<p class="hjelpetekst">Ingen aktive kunder ennå — opprett en under Kunder-fanen.</p>';
+  const vkKort = $('velg-kunde-kort');
+  if(vkKort){
+    vkKort.hidden = !trengerValg;
+    if(trengerValg){
+      const aktive = kunder.filter(k=>k.aktiv);
+      $('velg-kunde-liste').innerHTML = aktive.length
+        ? aktive.map(k=>'<button class="btn btn-ghost" style="margin:0 8px 8px 0" onclick="velgKunde(\''+k.id+'\')">'+esc(k.navn)+'</button>').join('')
+        : '<p class="hjelpetekst">Ingen aktive kunder ennå — opprett en under Kunder-fanen.</p>';
+    }
   }
   // Banner med valgt kunde (kun Nora-admin på kunde-faner). Kunde-admin ser aldri
   // kundevalg eller kontekst-tekst — alt gjelder implisitt egen bedrift.
   const kNavn = (kunder.find(k=>k.id===valgtKunde)||{}).navn || '';
   const visBanner = erNora && kNavn && scopedeFaner.includes(id) && !trengerValg;
-  $('kunde-banner').hidden = !visBanner;
-  if(visBanner) $('kunde-banner-navn').textContent = kNavn;
+  const kBanner = $('kunde-banner');
+  if(kBanner){
+    kBanner.hidden = !visBanner;
+    if(visBanner) $('kunde-banner-navn').textContent = kNavn;
+  }
   if(!trengerValg) oppdaterAktivFane();
 }
 function velgKunde(id){ valgtKunde = id; byttFane(aktivFane); }
@@ -582,6 +593,16 @@ async function visOrdliste(){
     : '<p class="hjelpetekst">Ingen termer ennå.</p>';
   const kundens = termer.filter(t=>t.kunde_id);
   const globale = termer.filter(t=>!t.kunde_id);
+  // Kunde-admin/bruker ser KUN kundens egen liste. Den globale (Nora AIs fagordbok,
+  // ingen kundedata) vises og redigeres kun av Nora AI-admin — men brukes fortsatt
+  // automatisk i alle oversettelser.
+  if(!erNora){
+    $('term-liste').innerHTML =
+      '<h3 style="margin-bottom:8px">Ordliste — '+esc(kNavn)+'</h3>'+
+      '<p class="hjelpetekst" style="margin-bottom:8px">Egne fagbegreper for deres tilbud. I tillegg bruker oversettelsen Nora AIs standard fagordbok automatisk.</p>'+
+      tabell(kundens, true);
+    return;
+  }
   const seksjon = (nokkel, tittel, undertekst, liste, kanEndre) => {
     const apen = ordlisteApen[nokkel];
     return '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:12px;overflow:hidden">'+
