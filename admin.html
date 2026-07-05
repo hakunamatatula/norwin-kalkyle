@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="admin-2026-07-04-v13"/>
+<meta name="app-version" content="admin-2026-07-04-v14"/>
 <title>Nora AI — Adminpanel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -92,10 +92,10 @@
   </header>
   <nav class="faner" id="faner"></nav>
   <main>
-    <div class="verktoylinje" id="kundevelger-rad" hidden>
-      <div><label>Du administrerer nå</label><select id="kundevelger" onchange="byttKunde()"></select></div>
+    <div id="kunde-banner" hidden style="display:flex;justify-content:space-between;align-items:center;background:rgba(251,130,122,.12);border:1px solid var(--coral);border-radius:8px;padding:10px 16px;margin-bottom:16px">
+      <div>Du administrerer: <strong id="kunde-banner-navn"></strong></div>
+      <button class="btn btn-ghost btn-liten" onclick="byttFane('kunder')">Bytt kunde</button>
     </div>
-    <div id="kontekst-linje" class="hjelpetekst" style="margin:-6px 0 14px 0" hidden></div>
     <div id="app-melding" class="melding"></div>
     <section id="fane-kunder" hidden>
       <div class="kort">
@@ -352,31 +352,29 @@ async function startApp(){
 
 async function lastKunder(){
   kunder = await api('/rest/v1/kunder?select=*&order=navn');
-  const v = $('kundevelger');
-  v.innerHTML = kunder.map(k=>'<option value="'+k.id+'">'+esc(k.navn)+(k.aktiv?'':' (deaktivert)')+'</option>').join('');
-  if(!valgtKunde && kunder.length) valgtKunde = kunder[0].id;
-  if(valgtKunde) v.value = valgtKunde;
+  // Ingen auto-valg: Nora-admin velger kunde eksplisitt via «Administrer» (drill-down)
 }
-
-function byttKunde(){ valgtKunde = $('kundevelger').value; oppdaterAktivFane(); }
 
 let aktivFane = null;
 function byttFane(id){
   aktivFane = id;
+  const erNora = minProfil && minProfil.rolle==='nora_admin';
+  const scopedeFaner = ['innstillinger','ordliste','logo','logg'];
   ['kunder','brukere','innstillinger','ordliste','logo','logg'].forEach(f=>{
     const s=$('fane-'+f), b=$('fane-btn-'+f);
     if(s) s.hidden = f!==id;
-    if(b) b.classList.toggle('aktiv', f===id);
+    if(b){
+      b.classList.toggle('aktiv', f===id);
+      // Nora-admin: kunde-scopede faner vises først når en kunde er valgt via «Administrer»
+      b.style.display = (erNora && !valgtKunde && scopedeFaner.includes(f)) ? 'none' : '';
+    }
   });
-  // Kundevelger: kun Nora-admin, og kun på kunde-scopede faner.
-  // Kunder-fanen er global liste; Brukere-fanen viser ALLE brukere for Nora-admin.
-  const erNora = minProfil && minProfil.rolle==='nora_admin';
-  const scopet = !['kunder','brukere'].includes(id);
-  $('kundevelger-rad').hidden = !(erNora && scopet);
-  const kNavn = (kunder.find(k=>k.id===valgtKunde)||{}).navn || minKundeNavn || '';
-  const visKontekst = kNavn && (scopet || (id==='brukere' && !erNora));
-  $('kontekst-linje').hidden = !visKontekst;
-  $('kontekst-linje').innerHTML = visKontekst ? 'Fanen gjelder kunden: <strong style="color:var(--text)">'+esc(kNavn)+'</strong>' : '';
+  // Kontekst-banner: kun for Nora-admin på kunde-scopede faner. Kunde-admin ser aldri
+  // kundevalg eller kontekst-tekst — alt gjelder implisitt egen bedrift.
+  const kNavn = (kunder.find(k=>k.id===valgtKunde)||{}).navn || '';
+  const visBanner = erNora && kNavn && scopedeFaner.includes(id);
+  $('kunde-banner').hidden = !visBanner;
+  if(visBanner) $('kunde-banner-navn').textContent = kNavn;
   oppdaterAktivFane();
 }
 function oppdaterAktivFane(){
@@ -423,15 +421,13 @@ async function opprettKunde(){
     $('nyk-logo').value=''; $('nyk-dekning').value=30; $('nyk-min').value=20; $('nyk-maks').value=50;
     valgtKunde = r.kunde.id;
     await lastKunder();
-    $('kundevelger').value = valgtKunde;
     meld('app-melding', r.advarsel || ('Kunden «'+navn+'» er opprettet'+(r.invitert?', og '+r.invitert+' er invitert som kunde-admin':'')+'.'), r.advarsel?'feil':'ok');
-    byttFane('brukere');
+    byttFane('innstillinger');
   }catch(e){ meld('app-melding',e.message,'feil'); }
 }
 function administrerKunde(id){
   valgtKunde = id;
-  if($('kundevelger')) $('kundevelger').value = id;
-  byttFane('brukere');
+  byttFane('innstillinger');
 }
 async function toggleKunde(id, aktiv){
   try{ await api('/rest/v1/kunder?id=eq.'+id, {method:'PATCH', body:JSON.stringify({aktiv})}); await visKunder(); }
