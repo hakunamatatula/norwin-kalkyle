@@ -2697,9 +2697,23 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       const tc   = await page.getTextContent();
 
       // Finn produkter på denne siden (posId + y-posisjon i PDF-pts)
-      const prodItems = tc.items
-        .map(it => ({ str: it.str.trim(), y: it.transform[5], x: it.transform[4] }))
+      const allTcItems = tc.items.map(it => ({ str: it.str.trim(), y: it.transform[5], x: it.transform[4] }));
+      const prodItems = allTcItems
         .filter(it => PROD_RE.test(it.str) && it.x < 60);
+
+      // Aliuminatas-format: "Nx  seq  KODE" splittet over flere tekstelementer på samme y-linje
+      // (f.eks. "5x" ved x=70.8, "1" ved x=91, "V01" ved x=211 - alle med identisk y)
+      const ALIUM_HDR_RE = /^\d+x$/i;
+      allTcItems
+        .filter(it => ALIUM_HDR_RE.test(it.str) && it.x < 90)
+        .forEach(hdr => {
+          const lineStr = allTcItems
+            .filter(it => Math.abs(it.y - hdr.y) < 1.5)
+            .sort((a, b) => a.x - b.x)
+            .map(it => it.str).join(' ');
+          const m = lineStr.match(/^\d+x\s+\d+\s+(\S+)/i);
+          if (m) prodItems.push({ str: lineStr, y: hdr.y, x: hdr.x, aliumCode: m[1] });
+        });
 
       if (prodItems.length === 0) continue;
       prodItems.sort((a, b) => b.y - a.y); // topp-til-bunn
@@ -2747,13 +2761,15 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
         // Fallback: ignorerer operatorer, bruker heuristisk crop
       }
 
-      // Store tegninger: bredde OG høyde > 80pt (ikke logoer)
-      const drawings = imagePlacements.filter(img => img.w > 80 && img.h > 80);
+      // Store tegninger: høyde > 80pt (ikke logoer). Bredde varierer for enkelte
+      // Aliuminatas-tegninger (ned mot ~75pt), så bredde er ikke lenger et
+      // ekskluderingskriterium - høyde alene skiller pålitelig fra logoer (<=49pt).
+      const drawings = imagePlacements.filter(img => img.h > 80);
 
       for (let pi = 0; pi < prodItems.length; pi++) {
         const prod      = prodItems[pi];
         const posMatch  = prod.str.match(PROD_RE);
-        const posId     = posMatch ? posMatch[1] : `P${globalSeq}`;
+        const posId     = prod.aliumCode || (posMatch ? posMatch[1] : `P${globalSeq}`);
         const prodY     = prod.y; // PDF y (bunn til topp)
         const nextProd  = prodItems[pi + 1];
         const yLow      = nextProd ? nextProd.y : 0;
