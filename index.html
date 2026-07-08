@@ -173,7 +173,7 @@
   #fabrikk-detect-box { display: none !important; }
 
   /* ── Login-overlay ─────────────────────────────────────────────────── */
-  .login-overlay { display:none; position:fixed; inset:0; background:var(--bg); z-index:9999; align-items:center; justify-content:center; }
+  .login-overlay { display:none; position:fixed; inset:0; background:var(--bg); z-index:9999; align-items:flex-start; justify-content:center; overflow-y:auto; padding-top:min(10vh,80px); }
   .login-overlay.show { display:flex; }
   .login-box { background:var(--bg2); border:1px solid var(--border); padding:40px; width:420px; border-radius:16px; box-shadow:0 24px 64px rgba(0,0,0,0.6); }
   .login-logo { font-family:'Bricolage Grotesque',sans-serif; font-size:22px; font-weight:700; color:var(--text); margin-bottom:4px; }
@@ -493,7 +493,9 @@
 </div>
 
 <!-- ── Admin-panel (slideout) ──────────────────────────────────────────── -->
-<div class="header">
+<!-- Skjult som standard (display:none) til sjekkInnlogging() avgjør status —
+     unngår at hele app-UI-et blinker synlig bak login-overlayen ved sideinnlasting. -->
+<div class="header" style="display:none;">
   <div>
     <div class="logo-name">MER KAPITAL</div>
     <div class="logo-sub">Tilbudsverktøy — <span id="header-kunde-navn" style="font-weight:700;"></span></div>
@@ -507,7 +509,7 @@
   </div>
 </div>
 
-<div class="no-print" id="form-area">
+<div class="no-print" id="form-area" style="display:none;">
 
   <!-- Felles: Valutakurs (alltid synlig) -->
   <div class="quick-calc" style="border-radius:0 0 6px 6px;margin-top:0;">
@@ -4850,6 +4852,18 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     } catch(e) { errEl.textContent = 'Klarte ikke sende e-post: ' + e.message; }
   }
 
+  /** Vis/skjul kalkulator-UI-et (header + skjema) — skal kun vises når innlogget.
+      Uten dette forblir hele appen i dokumentflyten bak login-overlayen, som gjør
+      siden mye høyere enn selve innloggingsboksen (synlig som stort tomrom over
+      boksen når appen kjører i et iframe med annen høyde enn viewporten, f.eks.
+      embedded på merkapital.no). */
+  function settAppSynlig(synlig) {
+    const header = document.querySelector('.header');
+    const form   = document.getElementById('form-area');
+    if (header) header.style.display = synlig ? 'flex' : 'none';
+    if (form)   form.style.display   = synlig ? 'block' : 'none';
+  }
+
   /** Logg inn via Supabase Auth og hent rolle fra profiles. */
   async function loggInn() {
     const epost = (document.getElementById('login-email').value || '').trim().toLowerCase();
@@ -4900,6 +4914,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
     const overlay = document.getElementById('login-overlay');
     if (overlay) { overlay.classList.remove('show'); overlay.style.display = 'none'; }
+    settAppSynlig(true);
 
     oppdaterAdminKnapp(NORA_SESJON.rolle);
 
@@ -4915,6 +4930,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     slettSession();
     const overlay = document.getElementById('login-overlay');
     if (overlay) { overlay.style.display = 'flex'; overlay.classList.add('show'); }
+    settAppSynlig(false);
     lukkAdminPanel();
     document.getElementById('login-email').value = '';
     document.getElementById('login-pass').value  = '';
@@ -4989,12 +5005,14 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       if (kontekstOk === false) {
         slettSession();
         if (overlay) { overlay.style.display = 'flex'; overlay.classList.add('show'); }
+        settAppSynlig(false);
         const errEl = document.getElementById('login-error');
         if (errEl) errEl.textContent = 'Selskapet er deaktivert. Kontakt Nora AI.';
         oppdaterAdminKnapp(null);
         return;
       }
       if (overlay) { overlay.style.display = 'none'; overlay.classList.remove('show'); }
+      settAppSynlig(true);
       oppdaterAdminKnapp(NORA_SESJON.rolle || 'bruker');
       const innloggetEl = document.getElementById('innlogget-info');
       if (innloggetEl) innloggetEl.textContent = `${NORA_SESJON.epost} (${NORA_SESJON.rolle || 'bruker'})`;
@@ -5002,6 +5020,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       return;
     }
     if (overlay) { overlay.style.display = 'flex'; overlay.classList.add('show'); }
+    settAppSynlig(false);
     oppdaterAdminKnapp(null);
   })();
 
