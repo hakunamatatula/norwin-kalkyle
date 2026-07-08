@@ -1213,7 +1213,7 @@ ${klon.outerHTML}
   // Versjonsstyrt cache-rydding: rydder gammel rate-cache når app-versjon endres.
   // Forhindrer at nettleseren viser gammel fallback-kurs (11.20) etter kodeoppdatering.
   // Viktig: oppdater APP_VERSION ved hver ny deployment (f.eks. '2026-05-21-v1').
-  const APP_VERSION = '2026-07-04-v39';
+  const APP_VERSION = '2026-07-08-v43';
   try {
     if (localStorage.getItem('merkapital_app_version') !== APP_VERSION) {
       localStorage.removeItem(RATE_CACHE_KEY);
@@ -1911,7 +1911,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       const tc   = await page.getTextContent();
       const items = tc.items
         .filter(it => it.str && it.str.trim())
-        .map(it => ({ str: it.str.trim(), x: it.transform[4], y: it.transform[5] }));
+        .map(it => ({ str: it.str.trim(), x: it.transform[4], y: it.transform[5], w: it.width || 0 }));
       if (!items.length) continue;
       items.sort((a, b) => b.y - a.y); // høyest y = topp av siden (PDF-koordinater)
       const groups = [];
@@ -1923,9 +1923,21 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
           groups.push({ y0: it.y, items: [it] });
         }
       }
+      // GAP_THRESHOLD: sett inn mellomrom kun der det er et reelt visuelt gap (>1pt)
+      // mellom to elementer. Enkelte fabrikk-PDF-er (f.eks. Aldens) lagrer hvert
+      // tegn som eget, separat posisjonert tekstelement — en naiv join med fast
+      // mellomrom ville da splittet hvert ord i enkelttegn ("P o s . A L U - 1").
+      // Målte gap: innad i ord ≈0pt, mellom ord/felt ≥2,5pt — 1pt gir god margin.
+      const GAP_THRESHOLD = 1;
       for (const g of groups) {
         g.items.sort((a, b) => a.x - b.x);
-        const text = g.items.map(i => i.str).join(' ');
+        let text = '';
+        let prevRight = null;
+        for (const it of g.items) {
+          if (prevRight !== null && (it.x - prevRight) > GAP_THRESHOLD) text += ' ';
+          text += it.str;
+          prevRight = it.x + it.w;
+        }
         if (text.trim()) allLines.push(text.trim());
       }
     }
@@ -3027,20 +3039,22 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
     // ── PRODUKTPOSISJONER ────────────────────────────────────────────────────
     // pdf.js gir NORMAL tekst fra Aldens-PDFer, men med mellomrom rundt bindestreker:
-    //   "Pos. ALU - 1 MB - 78EI Display Lock 1:"   (venstre + høyre kolonne smeltet)
+    //   "Pos. ALU-1 MB-78EI Display Lock 1:"   (venstre + høyre kolonne smeltet)
     //   "windows (B = 1 390, H = 2 390) Strike plate 1:"
     //   "Pcs. : 1"  eller  "Pcs.: 1"
     //   "Total without VAT : 2723,56"
-    // Regex-er må håndtere "ALU - 1" og "B = 1 390" med valgfrie mellomrom.
+    // Posisjonskoden etter "Pos." er IKKE alltid "ALU-N" — ekte kundetilbud bruker
+    // også IV-01, V-1, V1, YD-01, YD-4_V osv. (verifisert mot 5 ekte Aldens-tilbud,
+    // hvorav kun 1 brukte ALU-prefiks). Fang derfor det første ordet uansett format.
     const products = [];
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
-      // "Pos. ALU - 1 ..." — ALU etterfulgt av valgfrie mellomrom rundt bindestrek og tall
-      const posM = l.match(/^Pos\.\s+ALU\s*-\s*(\d+)\s*(.*)/i);
+      // "Pos. <kode> ..." — kode kan være ALU-1, IV-01, V-1, V1, YD-4_V osv.
+      const posM = l.match(/^Pos\.\s*([^\s:]+)\s*(.*)/i);
       if (!posM) continue;
-      const posId = 'ALU-' + posM[1];
+      const posId = posM[1].replace(/\s*-\s*/g, '-');
 
-      // Alt etter ALU-N på Pos.-linjen, men stopp ved "Lock N:" (høyrekolonne-label)
+      // Alt etter posisjonskoden på Pos.-linjen, men stopp ved "Lock N:" (høyrekolonne-label)
       // "MB - 78EI Display Lock 1:" → normaliser bindestreker → "MB-78EI Display"
       const typeStr = posM[2]
         .replace(/\s*Lock\s*\d*\s*:?.*/i, '')       // fjern "Lock 1:" suffix
@@ -3073,6 +3087,13 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
         }
         if (/^(Total\s*without|Pos\.)/i.test(l2)) break;
       }
+
+      // Gyldighetssjekk: en ekte posisjon har ALLTID mål og/eller antall i nærheten.
+      // Filtrerer bort løpetekst/notater som tilfeldigvis starter med "Pos. <ord>"
+      // (observert i fritekst-merknader i enkelte tilbud), uten å anta noe om
+      // fabrikk- eller posisjonskode-format.
+      if (!dimM && !pcsLineFound) continue;
+
       products.push({ posId, desc: typeStr, dimW, dimH, pcs });
     }
 
@@ -3188,7 +3209,11 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
   }
 
   // ── ALIUMINATAS-PARSER (ALIUMINATAS UAB, Vilnius, Lithuania) ──────────────────
-  // Tilbudsformat: engelsk, ett produkt per side, ALU-N header etter "Nx  seq"-linje
+  // Tilbudsformat: engelsk, ett produkt per side. Posisjonsheader er "Nx seq KODE"
+  // (f.eks. "5x 1 V01", "1x 2 YGF01", "1x 1 ALU-1") — posisjonskoden er IKKE alltid
+  // "ALU-N", den varierer fritt per prosjekt/kunde (V01, YGF01, YD-01 osv. er alle
+  // observert i ekte fabrikktilbud). Blokkstart gjenkjennes derfor på selve
+  // "Nx seq"-mønsteret, ikke på et hardkodet kode-prefiks.
   // Bildeblokker er JPEG-er embeddet i PDF (bruker Aradas-ekstraktor for bilder).
   function parseAliuminatasPDF(rawText, valutakurs, faktorInput) {
     function parseEurNum(s) {
@@ -3212,28 +3237,21 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     const projM = rawText.match(/PROJECT\s+(.+?)(?:\n|AGREEMENT)/);
     if (projM) prosjekt = projM[1].trim();
 
-    // Finn alle "ALU-N" blokkstarter, og gå bakover for å finne antall (Nx)
+    // Finn alle posisjonsheadere ("Nx seq KODE" på egen linje, f.eks. "5x 1 V01")
     const products = [];
-    const aluRe = /^(ALU-\d+[a-zA-Z]*)\s*$/gm;
+    const posRe = /^(\d+)x\s+(\d+)\s+(\S+)\s*$/gm;
+    const posMatches = [];
     let m;
-    while ((m = aluRe.exec(rawText)) !== null) {
-      const posId = m[1];
-      // Se bakover (maks 150 tegn) etter "Nx  seq"-mønster
-      const before = rawText.slice(Math.max(0, m.index - 150), m.index);
-      const qtyM   = before.match(/(\d+)x\s+\d+\s*\n\s*$/);
-      const qty     = qtyM ? parseInt(qtyM[1]) : 1;
+    while ((m = posRe.exec(rawText)) !== null) {
+      posMatches.push({ qty: parseInt(m[1]), posId: m[3], index: m.index, endIndex: m.index + m[0].length });
+    }
+    for (let pi = 0; pi < posMatches.length; pi++) {
+      const cur   = posMatches[pi];
+      const posId = cur.posId;
+      const qty   = cur.qty;
 
-      // Finn slutten av denne blokken — neste ALU-N-linje eller ALIUMINATAS-footer
-      const rest     = rawText.slice(m.index);
-      const nextAlu  = rest.search(/\n(ALU-\d+[a-zA-Z]*)\s*\n/);
-      const footer   = rest.indexOf('ALIUMINATAS UAB');
-      let endOff     = Math.min(
-        nextAlu  > 0 ? nextAlu  : Infinity,
-        footer   > 0 ? footer   : Infinity,
-        2500
-      );
-      if (!isFinite(endOff)) endOff = rest.length;
-      const block = rest.slice(0, endOff);
+      // Blokken går fra slutten av denne headeren til starten av neste (eller filslutt)
+      const block = rawText.slice(cur.endIndex, pi + 1 < posMatches.length ? posMatches[pi + 1].index : rawText.length);
 
       // Mål "1390 mm x 2390 mm"
       const dimM = block.match(/(\d{3,4})\s*mm\s*x\s*(\d{3,4})\s*mm/);
@@ -3296,7 +3314,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     }
 
     if (products.length === 0) {
-      throw new Error('Fant ingen produktposisjoner (Aliuminatas). Sjekk at riktig fabrikk er valgt.');
+      throw new Error('Fant ingen produktposisjoner i Aliuminatas-tilbudet. Kontroller at PDF-en har en lesbar tekstlag (ikke skannet bilde) og prøv på nytt.');
     }
 
     const faktor = faktorInput || _r2(valutakurs / 0.70);
