@@ -2998,6 +2998,102 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     return { skisser };
   }
 
+  // ── VITRON / ALIPLAST GENESIS BILDEEKSTRAKTOR ──────────────────────────────
+  // Vitron/Norwin-malen har INGEN innebygde rastertegninger (kun logo + sma
+  // punktikoner) - selve produkttegningen er vektorgrafikk med tekstlabler
+  // (dimensjonstall, GN-koder, S=..., vekt) plassert over "Pos. N GENESIS -
+  // ... (B=.., H=..)"-headeren. Samme render+crop-teknikk som HCTC/generisk,
+  // men med et Vitron-spesifikt "Pos. N"-anker (finnes ogsa i polsk mal:
+  // "Pos. N" er uoversatt selv nar resten av tabellhodet er pa polsk).
+  async function extractVitronSketches(file) {
+    const pdfjsLib = window.pdfjsLib;
+    if (!pdfjsLib) throw new Error('PDF-biblioteket ikke lastet.');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://hakunamatatula.github.io/tilbudskalkulator/pdf.worker.min.js';
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    const skisser = {};
+    const vnrMap  = {};
+    const scale   = 1.5;
+    const POS_RE  = /^Pos\.?$/i;
+
+    for (let pn = 1; pn <= pdf.numPages; pn++) {
+      const page  = await pdf.getPage(pn);
+      const vp1   = page.getViewport({ scale: 1.0 });
+      const tc    = await page.getTextContent();
+      const items = tc.items.map(it => ({ str: it.str.trim(), y: it.transform[5], x: it.transform[4] }));
+
+      // "Pos. N"-anker: håndterer både at "Pos." og tallet er separate
+      // tekstelementer (vanligst) og at de er slått sammen til ett element.
+      const rawAnchors = [];
+      items.forEach(it => {
+        if (POS_RE.test(it.str)) {
+          const sameLine = items
+            .filter(o => o !== it && Math.abs(o.y - it.y) < 1.5)
+            .sort((a, b) => a.x - b.x);
+          const numTok = sameLine.find(o => o.x > it.x && /^\d+$/.test(o.str));
+          if (numTok) rawAnchors.push({ posNr: parseInt(numTok.str, 10), y: it.y });
+          return;
+        }
+        const m = it.str.match(/^Pos\.?\s*(\d+)\b/i);
+        if (m) rawAnchors.push({ posNr: parseInt(m[1], 10), y: it.y });
+      });
+
+      const seen = new Set();
+      const posAnchors = rawAnchors.filter(a => {
+        const key = a.posNr + '@' + Math.round(a.y);
+        if (seen.has(key)) return false;
+        seen.add(key); return true;
+      });
+      if (posAnchors.length === 0) continue;
+      posAnchors.sort((a, b) => b.y - a.y); // topp-til-bunn (høy PDF-y = øverst)
+
+      // Render siden
+      const vp     = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = vp.width; canvas.height = vp.height;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+
+      for (let pi = 0; pi < posAnchors.length; pi++) {
+        const anchor = posAnchors[pi];
+        const prev   = posAnchors[pi - 1];
+        const topY   = prev ? prev.y : vp1.height;   // toppen av tegningsomradet (PDF-y)
+        const botY   = anchor.y - 26;                // bunn: under "Pos. N (B=,H=)"-blokken (2 linjer)
+
+        // Høyre grense: mal faktisk tekstinnhold i tegningsomradet (dimensjonstall,
+        // GN-koder), begrenset til maks 45% av sidebredden. Tabellkolonnene
+        // ("Quantity"/"Ilość" o.l.) starter alltid lengre ute (39-48% observert på
+        // tvers av engelsk/polsk mal), sa 45% er en trygg universell grense.
+        const maxXFrac = 0.45;
+        const regionOk = items.filter(it => it.y <= topY && it.y >= botY && it.x < vp1.width * maxXFrac);
+        const rightEdge = regionOk.length
+          ? Math.min(vp1.width * maxXFrac, Math.max(...regionOk.map(it => it.x)) + 40)
+          : vp1.width * maxXFrac;
+
+        const cX = 0;
+        const cW = Math.floor(rightEdge * scale);
+        const cY = Math.floor(vp.height - topY * scale);
+        const cH = Math.floor((topY - botY) * scale);
+
+        if (cW > 20 && cH > 20 && cY >= 0 && cY + cH <= canvas.height) {
+          const maxSide = 500;
+          const aspect  = cW / cH;
+          const nW = aspect >= 1 ? maxSide : Math.round(maxSide * aspect);
+          const nH = aspect >= 1 ? Math.round(maxSide / aspect) : maxSide;
+          const nc = document.createElement('canvas');
+          nc.width = nW; nc.height = nH;
+          const nCtx = nc.getContext('2d');
+          nCtx.fillStyle = '#ffffff'; nCtx.fillRect(0, 0, nW, nH);
+          nCtx.drawImage(canvas, cX, cY, cW, cH, 0, 0, nW, nH);
+          skisser[anchor.posNr] = nc.toDataURL('image/png').split(',')[1];
+          vnrMap[anchor.posNr]  = `Pos. ${anchor.posNr}`;
+        }
+      }
+    }
+
+    return { skisser, vnrMap };
+  }
+
   // ── ALDENS-PARSER (SIA "ALDENS HOLDING", Riga, Latvia) ─────────────────────────
   // Tilbudsformat: engelsk, to-kolonne-layout.
   //
@@ -3391,6 +3487,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
         try {
           let result;
           if (FABRIKK === 'aldens')                  result = await extractAldensSketches(selectedFile);
+          else if (FABRIKK === 'vitron')              result = await extractVitronSketches(selectedFile);
           else if (JPEG_FABRIKKER.includes(FABRIKK)) result = await extractPdfSkisserAradas(selectedFile);
           else                                       result = await extractPdfSkisser(selectedFile);
           if (result && result.skisser) { skisser = result.skisser; vnrMap = Object.assign({}, result.vnrMap || {}); }
@@ -3451,6 +3548,14 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
         const faktorInp = parseNum(document.getElementById('faktor').value);
         const res1      = parseVitronPDF(pdfText1, valutakurs, faktorInp);
         resFinal = res1;
+
+        try {
+          const imgResult = await extractVitronSketches(selectedFile);
+          if (imgResult && imgResult.skisser) {
+            skisser = imgResult.skisser;
+            vnrMap  = Object.assign({}, imgResult.vnrMap || {}, res1._vnrMap || {});
+          }
+        } catch(e) { console.warn('Bilde-ekstraksjon feilet (Vitron):', e); }
 
         if (selectedFile2) {
           const pdfText2 = await extractPdfTextLayout(selectedFile2);
