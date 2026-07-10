@@ -1243,7 +1243,7 @@ ${klon.outerHTML}
   // Versjonsstyrt cache-rydding: rydder gammel rate-cache når app-versjon endres.
   // Forhindrer at nettleseren viser gammel fallback-kurs (11.20) etter kodeoppdatering.
   // Viktig: oppdater APP_VERSION ved hver ny deployment (f.eks. '2026-05-21-v1').
-  const APP_VERSION = '2026-07-10-v47';
+  const APP_VERSION = '2026-07-10-v48';
   try {
     if (localStorage.getItem('merkapital_app_version') !== APP_VERSION) {
       localStorage.removeItem(RATE_CACHE_KEY);
@@ -1986,6 +1986,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     for (const ln of lines) {
       let r;
       if (!offerNum && (r = ln.match(/^Offer\s+([\d\-]+)/i)))           offerNum = r[1];
+      if (!offerNum && (r = ln.match(/^TILBUD\s+Nr\.?\s*:?\s*([\d\-]+)/i))) offerNum = r[1]; // norsk HCTC-variant (324764p)
       if (!dato     && (r = ln.match(/^(\d{4}-\d{2}-\d{2})$/)))         dato = r[1];
       if (!kunde    && (r = ln.match(/^Customer:\s*(.+)/i)))             kunde = r[1].trim();
       if (!kontakt  && (r = ln.match(/^Contact:\s*(.+)/i)))              kontakt = r[1].trim();
@@ -2076,10 +2077,35 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
     // ── PARSE HVERT PRODUKT ───────────────────────────────────────────────
     const faktor = faktorInp > 0 ? faktorInp : _r2(valutakurs / dekningsBrok());
-    const produkter = blockStarts.map((bs, idx) => {
+    // v48: GENESIS-layouten kan være interleavet av side-flyten: "Pos. N"-headeren
+    // står da rett OVER neste posisjons tegnings-/prisblokk, første posisjons
+    // priser ligger FØR "Pos. 1", og siste header-segment inneholder kun
+    // "Net total" (som før ble feiltolket som enhetspris — sett i PZA0566-2026,
+    // der posisjon 4 fikk hele nettototalen 9 318,47 EUR som pris). Løsning:
+    // parse også pre-segmentet før første header, behold prisbærende segmenter
+    // i rekkefølge, og par dem 1:1 med headerne (posnr/dim hentes fra header-
+    // segmentet). For vanlig layout der hvert header-segment bærer sin egen
+    // pris (f.eks. PZA0556-2026) er dette identisk med gammel oppførsel.
+    const headerSegs = blockStarts.map((bs, idx) => {
       const endIdx = idx + 1 < blockStarts.length ? blockStarts[idx+1].lineIdx : lines.length;
       return _parseVitronBlock(lines.slice(bs.lineIdx, endIdx), bs.posNr, faktor);
     });
+    const preSeg = blockStarts[0].lineIdx > 0
+      ? _parseVitronBlock(lines.slice(0, blockStarts[0].lineIdx), 0, faktor)
+      : null;
+    const alleSegs = (preSeg && preSeg.eur > 0) ? [preSeg, ...headerSegs] : headerSegs;
+    const prisSegs = alleSegs.filter(sg => sg.eur > 0);
+    let produkter;
+    if (prisSegs.length === blockStarts.length && alleSegs.length > blockStarts.length) {
+      // Interleavet: par prisblokk k med header k (dim fra headeren, resten fra prisblokken)
+      produkter = prisSegs.map((sg, k) => ({
+        ...sg, n: blockStarts[k].posNr,
+        dim: headerSegs[k].dim || sg.dim,
+        _posId: (sg._posId && !/^VIT-/.test(sg._posId)) ? sg._posId : `VIT-${blockStarts[k].posNr}`
+      }));
+    } else {
+      produkter = headerSegs;
+    }
 
     // Finn nettototal fra PDF (siste side)
     let netTotal = null;
@@ -2124,10 +2150,15 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     const qM = fullText.match(/\bx\s*([1-9]\d?)\b(?!\s*\d)/i);
     if (qM) ant = parseInt(qM[1]);
 
-    // Priser: "2 117,18", "1 648,58" o.l. (minst 2 desimaler, >10)
+    // Priser: "2 117,18", "1 648,58" o.l. (minst 2 desimaler, >10).
+    // v48: total-/MVA-linjer ekskluderes fra prisskannet — i interleavet layout
+    // kunne "Net total" ellers bli lest som en posisjons enhetspris.
+    const prisText = blockLines
+      .filter(l => !/^(Net|Gross)\s+total|^VAT\b/i.test(l))
+      .join('\n');
     const PRICE_RE = /\b(\d{1,3}(?:\s\d{3})*),(\d{2})\b/g;
     let pm;
-    while ((pm = PRICE_RE.exec(fullText)) !== null) {
+    while ((pm = PRICE_RE.exec(prisText)) !== null) {
       const val = _vitronNum(pm[1] + ',' + pm[2]);
       if (val > 10) allPrices.push(val);
     }
