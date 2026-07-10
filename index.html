@@ -1243,7 +1243,7 @@ ${klon.outerHTML}
   // Versjonsstyrt cache-rydding: rydder gammel rate-cache når app-versjon endres.
   // Forhindrer at nettleseren viser gammel fallback-kurs (11.20) etter kodeoppdatering.
   // Viktig: oppdater APP_VERSION ved hver ny deployment (f.eks. '2026-05-21-v1').
-  const APP_VERSION = '2026-07-10-v46';
+  const APP_VERSION = '2026-07-10-v47';
   try {
     if (localStorage.getItem('merkapital_app_version') !== APP_VERSION) {
       localStorage.removeItem(RATE_CACHE_KEY);
@@ -2881,7 +2881,16 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
             .sort((a, b) => a.x - b.x)
             .map(it => it.str).join(' ');
           const m = lineStr.match(/^\s*\d+x\s+\d+\s+(.+)$/i);
-          if (m) prodItems.push({ str: lineStr, y: hdr.y, x: hdr.x, aliumCode: m[1].replace(/\s+/g, '') });
+          if (m) {
+            // specX = venstre kant av kode-/spesifikasjonskolonnen (første fragment
+            // med x > 150) — brukes som høyre grense for vektor-skannet i v47.
+            const codeFrag = allTcItems
+              .filter(it => Math.abs(it.y - hdr.y) < 1.5 && it.str && it.x > 150)
+              .sort((a, b) => a.x - b.x)[0];
+            prodItems.push({ str: lineStr, y: hdr.y, x: hdr.x,
+                             aliumCode: m[1].replace(/\s+/g, ''),
+                             specX: codeFrag ? codeFrag.x : 205 });
+          }
         });
 
       if (prodItems.length === 0) continue;
@@ -2956,6 +2965,16 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
           relevantDrawings = drawings;
         }
 
+        // v47: Aliuminatas-tegninger kan være REN VEKTORGRAFIKK (ingen raster-
+        // XObjects, jf. tilbud 21-0570_4) — da fant ingen av bildeplasseringene
+        // over noe, og det gamle side-crop-fallbacket dro med seg hele
+        // spesifikasjonskolonnen. Piksel-skann det rendrede venstre båndet og
+        // beskjær etter 3mm-regelen (STANDARD-BILDEBESKJARING.md) i stedet.
+        if (relevantDrawings.length === 0 && prod.aliumCode) {
+          const vec = _aliumVectorCrop(canvas, vp, scale, prod, nextProd);
+          if (vec) relevantDrawings = [vec];
+        }
+
         if (relevantDrawings.length > 0) {
           // Ta den største tegningen
           const drawing = relevantDrawings.sort((a, b) => (b.w * b.h) - (a.w * a.h))[0];
@@ -2993,6 +3012,103 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     }
 
     return { skisser, vnrMap };
+  }
+
+  /** v47: Finner Aliuminatas-VEKTORtegningens omriss ved piksel-skann av det
+   *  rendrede venstre båndet, og returnerer en crop-boks i samme format som
+   *  raster-bildeplasseringene ({x,y,w,h} i PDF-punkter, y fra bunn) med 3 mm
+   *  margin innbakt (8,5 pt, jf. STANDARD-BILDEBESKJARING.md).
+   *  Metode (verifisert mot alle 4 ekte Aliuminatas-tilbud 2026-07-10):
+   *  1. Skann-region: x fra 50pt til spesifikasjonskolonnen (specX - 6),
+   *     y fra like under posisjonsheaderen til neste posisjon / bunnmarg.
+   *  2. Maskér "linjaler": tynne (<=4 px-rader/kolonner) løp som er lange OG
+   *     solide (>=80 % fylt) — skillelinjen under headeren, footer-linjen og
+   *     celle-rammene rundt tegnekolonnen. Fylte dørflater er TYKKE løp og
+   *     beholdes (lærdom: bred dobbeltdør trigget lengde+tetthets-kriteriet).
+   *  3. Gap-trim: behold kun første sammenhengende innholdsblokk (gap > 25pt
+   *     avslutter) — utelater totals-blokken som står lenger ned på siste side.
+   *  4. Bbox + 3 mm margin, klippet mot maskerte linjaler så de ikke blør inn.
+   *  Returnerer null hvis ingenting finnes (da tar side-crop-fallbacket over). */
+  function _aliumVectorCrop(canvas, vp, scale, prod, nextProd) {
+    const specX = prod.specX || 205;
+    const px0 = Math.max(0, Math.round(50 * scale));
+    const px1 = Math.min(canvas.width, Math.round((specX - 6) * scale));
+    const py0 = Math.max(0, Math.round(vp.height - (prod.y - 5) * scale));
+    const py1 = Math.min(canvas.height, Math.round(nextProd
+      ? vp.height - (nextProd.y + 19) * scale
+      : vp.height - 55 * scale));
+    if (px1 - px0 < 30 || py1 - py0 < 30) return null;
+
+    const D = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    const cw = canvas.width;
+    const dark = (x, y) => {
+      const o = (y * cw + x) * 4;
+      return D[o + 3] > 50 && (D[o] < 235 || D[o + 1] < 235 || D[o + 2] < 235);
+    };
+
+    // 1+2a: rad-ekstent + kandidat-rader (lange og solide)
+    const rowext = new Map();
+    const cand = new Set();
+    for (let y = py0; y < py1; y++) {
+      let rmin = -1, rmax = -1, cnt = 0;
+      for (let x = px0; x < px1; x++) if (dark(x, y)) { if (rmin < 0) rmin = x; rmax = x; cnt++; }
+      if (rmin < 0) continue;
+      rowext.set(y, true);
+      if ((rmax - rmin) >= 120 * scale && cnt >= 0.8 * (rmax - rmin)) cand.add(y);
+    }
+    const rowMask = new Set();
+    let run = [];
+    for (let y = py0; y <= py1; y++) {
+      if (cand.has(y)) run.push(y);
+      else { if (run.length && run.length <= 4) run.forEach(v => rowMask.add(v)); run = []; }
+    }
+    // 2b: kolonne-linjaler (celle-rammer): høye + solide, løp <= 4 kolonner
+    const ccand = new Set();
+    for (let x = px0; x < px1; x++) {
+      let cmin = -1, cmax = -1, cnt = 0;
+      for (const y of rowext.keys()) {
+        if (rowMask.has(y)) continue;
+        if (dark(x, y)) { if (cmin < 0) cmin = y; cmax = y; cnt++; }
+      }
+      if (cmin >= 0 && (cmax - cmin) >= 300 * scale && cnt >= 0.8 * (cmax - cmin)) ccand.add(x);
+    }
+    const colMask = new Set();
+    run = [];
+    for (let x = px0; x <= px1; x++) {
+      if (ccand.has(x)) run.push(x);
+      else { if (run.length && run.length <= 4) run.forEach(v => colMask.add(v)); run = []; }
+    }
+
+    // 3: gap-trim til første sammenhengende blokk
+    const ys = [...rowext.keys()].filter(y => !rowMask.has(y)).sort((a, b) => a - b);
+    if (!ys.length) return null;
+    let blockEnd = ys[0];
+    for (const y of ys) { if (y - blockEnd > 25 * scale) break; blockEnd = y; }
+    let minx = Infinity, maxx = -1;
+    for (const y of ys) {
+      if (y > blockEnd) break;
+      for (let x = px0; x < px1; x++) {
+        if (colMask.has(x)) continue;
+        if (dark(x, y)) { if (x < minx) minx = x; if (x > maxx) maxx = x; }
+      }
+    }
+    if (maxx < 0) return null;
+    const miny = ys[0], maxy = blockEnd;
+
+    // 4: 3 mm margin, klippet mot maskerte linjaler
+    const m3 = 8.5 * scale;
+    let top = miny - m3, bot = maxy + m3;
+    rowMask.forEach(ry => {
+      if (ry < miny && ry >= top - 1) top = ry + 2;
+      if (ry > maxy && ry <= bot + 1) bot = ry - 2;
+    });
+    const cx0 = Math.max(0, minx - m3);
+    const cx1 = Math.min(canvas.width, maxx + m3);
+    top = Math.max(0, top);
+    bot = Math.min(canvas.height, bot);
+    // Tilbake til PDF-punkter (y fra bunn) — samme format som raster-plasseringene
+    return { x: cx0 / scale, w: (cx1 - cx0) / scale,
+             h: (bot - top) / scale, y: (vp.height - bot) / scale };
   }
 
   /** Fallback: deler siden i N horisontale bånd og returnerer midtdelen av båndet. */
