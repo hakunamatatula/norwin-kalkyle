@@ -538,7 +538,7 @@
           </div>
           <div id="fabrikk-hint-aradas" style="display:none;font-size:12px;color:var(--muted);margin-top:8px;background:var(--gold-bg);border:1px solid var(--gold);border-radius:4px;padding:7px 10px;">
             💡 <strong id="fabrikk-hint-navn">Aradas:</strong> Faktorpåslag × fabrikk EUR-pris = NOK kundepris.
-            For 30% dekning: faktor ≈ <span id="hint-faktor">—</span>
+            For <span id="hint-dekning">30</span>% dekning: faktor ≈ <span id="hint-faktor">—</span>
           </div>
         </div>
 
@@ -605,6 +605,9 @@
   <div class="loading-text">Analyserer tilbud og beregner priser...</div>
 </div>
 
+<!-- Varsel når AI-tolkning ikke var tilgjengelig og reserve-parseren ble brukt -->
+<div class="no-print" id="ai-varsel" style="display:none;margin:0 auto 14px;max-width:860px;background:#FFF4E5;border:1px solid #E8A13C;border-radius:8px;padding:12px 16px;font-size:13px;color:#7A5200;line-height:1.5;"></div>
+
 <div id="result">
   <div class="margin-panel no-print" id="margin-panel">
     <div class="margin-panel-title">◈ Tilbudsøkonomi</div>
@@ -638,6 +641,16 @@
   const NORA_SESS_KEY = 'nora_sesjon'; // delt med admin.html — én innlogging gjelder begge
 
   let NORA_SESJON = null; // {access_token, refresh_token, expires_at, epost, rolle}
+  let KUNDE_ID = null;          // innlogget brukers kunde (null for Nora AI-ansatte)
+  let DEKNING_PROSENT = 30;     // hentes fra innstillinger-tabellen per kunde ved innlogging
+  let STANDARD_FAKTOR = null;   // valgfri fast faktor fra kundens innstillinger
+
+  /** Brøkdel av salgspris som er kostpris ved ønsket dekning, f.eks. 30 % dekning -> 0.70. */
+  function dekningsBrok() {
+    const d = parseFloat(DEKNING_PROSENT);
+    if (!isFinite(d) || d <= 0 || d >= 95) return 0.70;
+    return 1 - d / 100;
+  }
 
   function noraLastSesjon() {
     try { NORA_SESJON = JSON.parse(localStorage.getItem(NORA_SESS_KEY)); }
@@ -678,7 +691,7 @@
       body: JSON.stringify({
         system: NORA_SYSTEMPROMPT,
         messages: [{ role: 'user', content: 'Faktorpåslag: ' + (faktor > 0 ? faktor.toFixed(4) : '0') + '\n\n' + pdfText }],
-        max_tokens: 8000
+        max_tokens: 16000
       })
     });
     const data = await r.json();
@@ -732,6 +745,21 @@
       const hdr = { apikey: SB_KEY, Authorization: 'Bearer ' + token };
       const pr = await fetch(SB_URL + '/rest/v1/profiles?id=eq.' + payload.sub + '&select=kunde_id', { headers: hdr });
       const kid = ((await pr.json())[0] || {}).kunde_id || null;
+      KUNDE_ID = kid;
+
+      // Dekning/faktor iht. kundens innstillinger (adminpanelet) — RLS gir kun egen kunde
+      try {
+        const innFilter = kid ? 'kunde_id=eq.' + kid + '&' : '';
+        const ir = await fetch(SB_URL + '/rest/v1/innstillinger?' + innFilter + 'select=dekning_prosent,standard_faktor&limit=1', { headers: hdr });
+        const inn = (await ir.json())[0];
+        if (inn) {
+          if (inn.dekning_prosent != null) DEKNING_PROSENT = parseFloat(inn.dekning_prosent) || 30;
+          STANDARD_FAKTOR = (inn.standard_faktor != null && parseFloat(inn.standard_faktor) > 0) ? parseFloat(inn.standard_faktor) : null;
+          const fEl = document.getElementById('faktor');
+          if (fEl && !fEl.value.trim() && STANDARD_FAKTOR) fEl.value = String(STANDARD_FAKTOR).replace('.', ',');
+          oppdaterFabrikkHint();
+        }
+      } catch(e) { /* innstillinger-synk er ikke kritisk — default 30 % beholdes */ }
 
       if (kid) {
         const kr = await fetch(SB_URL + '/rest/v1/kunder?id=eq.' + kid + '&select=navn,logo_url,aktiv', { headers: hdr });
@@ -1215,7 +1243,7 @@ ${klon.outerHTML}
   // Versjonsstyrt cache-rydding: rydder gammel rate-cache når app-versjon endres.
   // Forhindrer at nettleseren viser gammel fallback-kurs (11.20) etter kodeoppdatering.
   // Viktig: oppdater APP_VERSION ved hver ny deployment (f.eks. '2026-05-21-v1').
-  const APP_VERSION = '2026-07-08-v43';
+  const APP_VERSION = '2026-07-10-v45';
   try {
     if (localStorage.getItem('merkapital_app_version') !== APP_VERSION) {
       localStorage.removeItem(RATE_CACHE_KEY);
@@ -1981,7 +2009,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       throw new Error('Fant ingen produktposisjoner i PDF-teksten. Kontroller at riktig fabrikktilbud er lastet opp (Norwin-format).');
 
     // ── PARSE HVERT PRODUKT ──────────────────────────────────────────────────
-    const faktor = _r2((1 - rabatt / 100) / 0.70 * valutakurs);
+    const faktor = _r2((1 - rabatt / 100) / dekningsBrok() * valutakurs);
     const produkter = blockStarts.map((bs, idx) => {
       const endIdx = idx + 1 < blockStarts.length ? blockStarts[idx + 1].lineIdx : lines.length;
       return _parseBlock(lines.slice(bs.lineIdx, endIdx), bs.posNr, faktor);
@@ -2037,11 +2065,17 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       if (r) blockStarts.push({ posNr: parseInt(r[1]), lineIdx: i });
     }
 
-    if (!blockStarts.length)
-      throw new Error('Fant ingen produktposisjoner (Vitron/GENESIS-format). Kontroller at riktig fabrikktilbud er lastet opp.');
+    if (!blockStarts.length) {
+      // Vitron sender flere tilbudsformater: ALIPLAST GENESIS ("Pos. N …") og
+      // VEKA/Softline-vinduer ("Item Quantity Description U-Price T-Price" med
+      // posisjoner som "1 (1) 1 Pcs. Internal view"). Prøv VEKA-formatet før vi gir opp.
+      const veka = _parseVitronVeka(lines, valutakurs, faktorInp, { offerNum, dato, kunde });
+      if (veka) return veka;
+      throw new Error('Fant ingen produktposisjoner i PDF-en — tilbudsoppsettet er ukjent for reserve-parseren. (AI-tolkningen håndterer normalt alle oppsett automatisk, men var ikke tilgjengelig — se varselet.)');
+    }
 
     // ── PARSE HVERT PRODUKT ───────────────────────────────────────────────
-    const faktor = faktorInp > 0 ? faktorInp : _r2(valutakurs / 0.70);
+    const faktor = faktorInp > 0 ? faktorInp : _r2(valutakurs / dekningsBrok());
     const produkter = blockStarts.map((bs, idx) => {
       const endIdx = idx + 1 < blockStarts.length ? blockStarts[idx+1].lineIdx : lines.length;
       return _parseVitronBlock(lines.slice(bs.lineIdx, endIdx), bs.posNr, faktor);
@@ -2123,6 +2157,91 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
     return { n: posNr, dim, m2: 0, ant, eur: eurUnit, nok, sum, alt: false, s,
              _posId: posKode || `VIT-${posNr}` };
+  }
+
+  /** Vitron VEKA/Softline-format: "Item Quantity Description U-Price T-Price"-tabell
+   *  med posisjonslinjer som "1 (1) 1 Pcs. Internal view". Returnerer null hvis
+   *  formatet ikke gjenkjennes (slik at hovedparseren kan gi en tydelig feil). */
+  function _parseVitronVeka(lines, valutakurs, faktorInp, hdr) {
+    // ── Posisjonsblokker ─────────────────────────────────────────────────
+    const starts = [];
+    for (let i = 0; i < lines.length; i++) {
+      const r = lines[i].match(/^(\d{1,3})\s*\((\d{1,3})\)\s+(\d{1,3})\s*Pcs\.?\b/i);
+      if (r) starts.push({ posNr: parseInt(r[1]), ant: parseInt(r[3]), lineIdx: i });
+    }
+    if (!starts.length) return null;
+
+    // ── Header ───────────────────────────────────────────────────────────
+    let offerNum = hdr.offerNum || '', dato = hdr.dato || '', kunde = hdr.kunde || '';
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i];
+      let r;
+      if (!offerNum && (r = ln.match(/^Oferta\s*:?\s*(\S+)/i))) offerNum = r[1];
+      if (!offerNum && (r = ln.match(/^Offer\s*:?\s*(\S+)/i)))  offerNum = r[1];
+      if (!kunde && /^Building project:/i.test(ln) && i + 1 < lines.length) kunde = lines[i+1].trim();
+      if (!dato && (r = ln.match(/\b(\d{2})\.(\d{2})\.(\d{4})\b/))) dato = `${r[3]}-${r[2]}-${r[1]}`;
+    }
+
+    // ── Rabatt + nettototal (etter "Net price:") ─────────────────────────
+    let rabatt = 0, netPrice = null;
+    for (const ln of lines) {
+      let r;
+      if ((r = ln.match(/^Net\s+price:\s*([\d\s.]+,\d{2})\s*€/i))) netPrice = _vitronNum(r[1]);
+      if ((r = ln.match(/^(\d{1,2}(?:,\d{1,2})?)\s*%\s+[\d\s.]+,\d{2}\s*€/))) rabatt = _vitronNum(r[1]);
+    }
+
+    const faktor = faktorInp > 0 ? faktorInp
+      : _r2((1 - rabatt / 100) / dekningsBrok() * valutakurs);
+
+    const PRICE_LINE = /^([\d\s.]+,\d{2})\s*€\s+([\d\s.]+,\d{2})\s*€\s*$/;
+
+    const produkter = starts.map((st, idx) => {
+      const endIdx = idx + 1 < starts.length ? starts[idx+1].lineIdx
+        : (lines.findIndex((l, j) => j > st.lineIdx && /^Net\s+price:/i.test(l)) + 1 || lines.length + 1) - 1;
+      const block = lines.slice(st.lineIdx, endIdx);
+
+      let dim = '', m2 = 0, eurUnit = 0;
+      const s = [];
+      let etterPris = false;
+
+      for (let j = 1; j < block.length; j++) {
+        const ln = block[j];
+        let r;
+        if ((r = ln.match(PRICE_LINE))) { eurUnit = _vitronNum(r[1]); etterPris = true; continue; }
+        if ((r = ln.match(/^Size:\s*([\d\s]+)\s*x\s*([\d\s]+)\s*mm/i))) {
+          dim = r[1].replace(/\s/g,'') + 'x' + r[2].replace(/\s/g,'') + 'mm';
+          continue;
+        }
+        if ((r = ln.match(/^Surface:\s*([\d.,]+)\s*m2/i))) { m2 = _vitronNum(r[1].replace('.', ',')); }
+        if (etterPris) {
+          // Tilleggslinjer etter prisen (f.eks. "1 Pcs. ConturLine") hører til posisjonen
+          if (/^\d+\s*Pcs\.?\s+\S/i.test(ln)) s.push({ l: 'Tillegg', v: ln });
+          continue;
+        }
+        if ((r = ln.match(/^([A-ZÆØÅa-zæøå][\w\s()\/.-]{1,40}):\s*(.+)$/))) {
+          s.push({ l: r[1].trim(), v: r[2].trim() });
+        } else if (s.length && ln.trim()) {
+          // Fortsettelseslinje (f.eks. glasspesifikasjon over flere linjer)
+          s[s.length - 1].v += ' ' + ln.trim();
+        }
+      }
+
+      const nok = _r2(eurUnit * faktor);
+      const sum = _r2(nok * st.ant);
+      return { n: st.posNr, dim, m2, ant: st.ant, eur: eurUnit, nok, sum, alt: false, s,
+               _posId: `VIT-${st.posNr}` };
+    });
+
+    const main   = produkter.filter(p => !p.alt);
+    const eksMva = _r2(main.reduce((sm, p) => sm + p.sum, 0));
+    const mva    = _r2(eksMva * 0.25);
+    const tot    = _r2(eksMva + mva);
+
+    return {
+      t: offerNum, d: dato, r: rabatt, kunde, kontakt: '', kadr: '', mob: '', epost: '', prosjekt: kunde,
+      p: produkter, eksMva, mva, tot,
+      _fabrikk: 'vitron', _faktor: faktor
+    };
   }
 
   function _parseBlock(blockLines, posNr, faktor) {
@@ -2439,7 +2558,9 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     // ── FINN PRODUKTBLOKKER ──────────────────────────────────────────────────
     // Aradas-format: "V1 900 x 2150 mm." eller "LD2 2100 x 3245 mm."
     // extractPdfTextLayout grupperer "V1" og "900 x 2150 mm." på samme linje
-    const PROD_RE = /^([A-Z]{1,3}\d+[a-z]?)\s+(\d[\d\s,.]*)\s*[xX×]\s*(\d[\d\s,.]*)\s*mm\.?\s*$/i;
+    // NB: i noen Aradas-PDF-er flettes hele tabellraden på samme linje som koden:
+    // "V1 900 x 2150 mm. 1,94 m2 203,29 2 406,58" (m2, stk-pris, antall, totalt)
+    const PROD_RE = /^([A-Z]{1,3}\d+[a-z]?)\s+(\d[\d\s,.]*?)\s*[xX×]\s*(\d[\d\s,.]*?)\s*mm\.?(?:\s+(.+))?$/i;
     const blockStarts = [];
     for (let i = 0; i < lines.length; i++) {
       const m = lines[i].match(PROD_RE);
@@ -2447,17 +2568,18 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
         // Sanitize dimensions (remove internal spaces from e.g. "2 270")
         const w = m[2].replace(/\s/g, '').replace(',', '.');
         const h = m[3].replace(/\s/g, '').replace(',', '.');
-        blockStarts.push({ posId: m[1], posNr: blockStarts.length + 1, lineIdx: i, w, h });
+        blockStarts.push({ posId: m[1], posNr: blockStarts.length + 1, lineIdx: i, w, h,
+                           seed: _aradasRadFraRest(m[4] || '') });
       }
     }
 
     if (!blockStarts.length)
       throw new Error('Fant ingen produktposisjoner i PDF-teksten. Kontroller at riktig fabrikk er valgt (Aradas-format krever V1/V2/LD2-posisjonskoder).');
 
-    // Faktor: bruk brukerens input eller regn ut fra 30% dekning som default
+    // Faktor: bruk brukerens input eller regn ut fra kundens dekningsinnstilling
     const faktor = faktorInput && faktorInput > 0
       ? faktorInput
-      : _r2(valutakurs / 0.70);
+      : _r2(valutakurs / dekningsBrok());
 
     // Build vnrMap: {posNr: 'V1'} for rendering
     const vnrMap = {};
@@ -2465,8 +2587,24 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
     // ── PARSE HVERT PRODUKT ──────────────────────────────────────────────────
     const produkter = blockStarts.map((bs, idx) => {
-      const endIdx = idx + 1 < blockStarts.length ? blockStarts[idx + 1].lineIdx : lines.length;
-      const p = _parseAradasBlock(lines.slice(bs.lineIdx, endIdx), bs.posId, bs.w, bs.h, faktor);
+      let blockLines;
+      if (bs.seed) {
+        // Flettet tabellrad-layout: spesifikasjonen står OVER raden
+        // (mellom forrige posisjons rad og denne). Første posisjon ankres
+        // til "Tilbud"-overskriften så kundeinfo-feltene ikke blir med.
+        let startIdx = idx > 0 ? blockStarts[idx - 1].lineIdx + 1 : 0;
+        if (idx === 0) {
+          for (let j = bs.lineIdx - 1; j >= 0; j--) {
+            if (/^Tilbud$/i.test(lines[j]) || /^Prosjektets\s+navn\s*:/i.test(lines[j])) { startIdx = j + 1; break; }
+          }
+        }
+        const spec = lines.slice(startIdx, bs.lineIdx).filter(l => !/^Stk\.?\s+prisen/i.test(l));
+        blockLines = [lines[bs.lineIdx]].concat(spec);
+      } else {
+        const endIdx = idx + 1 < blockStarts.length ? blockStarts[idx + 1].lineIdx : lines.length;
+        blockLines = lines.slice(bs.lineIdx, endIdx);
+      }
+      const p = _parseAradasBlock(blockLines, bs.posId, bs.w, bs.h, faktor, bs.seed);
       p.n = bs.posNr;
       return p;
     });
@@ -2494,9 +2632,35 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     return res;
   }
 
+  /** Tolker resten av en flettet Aradas-posisjonslinje:
+   *  "1,94 m2 203,29 2 406,58" -> {m2, eur, ant}. Validerer eur x ant = totalt
+   *  for å skille stk-pris/antall/total fra hverandre ved tusen-mellomrom. */
+  function _aradasRadFraRest(rest) {
+    if (!rest) return null;
+    const m2m = rest.match(/^([\d.,]+)\s*m[²2]\s*(.*)$/i);
+    if (!m2m) return null;
+    const m2 = parseFloat(m2m[1].replace(',', '.')) || 0;
+    const tail = m2m[2].trim();
+    if (!tail) return { m2 };
+    const kandidater = [];
+    let r;
+    if ((r = tail.match(/^(\d{1,3}(?:\.\d{3})*,\d{2})\s+(\d+)\s+(\d{1,3}(?:[.\s]\d{3})*,\d{2})$/)))
+      kandidater.push({ eur: _parsEur(r[1]), ant: parseInt(r[2]), tot: _parsEur(r[3]) });
+    if ((r = tail.match(/^([\d\s.]+,\d{2})\s+(\d+)\s+([\d\s.]+,\d{2})$/)))
+      kandidater.push({ eur: _parsEur(r[1]), ant: parseInt(r[2]), tot: _parsEur(r[3]) });
+    const valid = kandidater.find(k => k.ant > 0 && Math.abs(k.eur * k.ant - k.tot) < 0.5);
+    const valgt = valid || kandidater[0];
+    return valgt ? { m2, eur: valgt.eur, ant: valgt.ant } : { m2 };
+  }
+
   /** Parser for ett Aradas-produktblok. */
-  function _parseAradasBlock(blockLines, posId, dimW, dimH, faktor) {
+  function _parseAradasBlock(blockLines, posId, dimW, dimH, faktor, seed) {
     let m2 = 0, eurPris = 0, ant = 1;
+    if (seed) {
+      if (seed.m2 > 0)  m2 = seed.m2;
+      if (seed.eur > 0) eurPris = seed.eur;
+      if (seed.ant > 0) ant = seed.ant;
+    }
     const specs = [];
 
     // Felt-regex: "Label: value" eller "Label (detail): value"
@@ -3251,7 +3415,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     const totalAreal   = areaM  ? areaM[1].replace(',','.') : '';
     const totalOmkrets = circM  ? circM[1].replace(',','.') : '';
 
-    const faktor = faktorInput || _r2(valutakurs / 0.70);
+    const faktor = faktorInput || _r2(valutakurs / dekningsBrok());
 
     // Tillegg fra fabrikk (hardware, pakking, levering) — legges i EUR-kostnad for marginberegning
     // men vises IKKE i kundetilbudet (kun til selger)
@@ -3343,13 +3507,24 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     if (offerM) tilbudsNr = offerM[1];
 
     let dato = '';
-    const dateM = rawText.match(/OFFER DATE\s+(\d{4}-\d{2}-\d{2})/);
+    const dateM = rawText.match(/OFFER DATE\s+(\d{4}-\d{2}-\d{2})/)
+               || rawText.match(/DATE\s+(\d{4}-\d{2}-\d{2})/); // eldre format: "ORDER No. - DATE 2021-08-18"
     if (dateM) dato = dateM[1].split('-').reverse().join('.');
 
     // Prosjekt
     let prosjekt = '';
     const projM = rawText.match(/PROJECT\s+(.+?)(?:\n|AGREEMENT)/);
     if (projM) prosjekt = projM[1].trim();
+
+    // Fabrikkrabatt ("Discount -10,0% -1 136,07 EUR" i sum-seksjonen). Bakes inn i
+    // faktoren som for HCTC/Vitron: kostpris = listepris x (1 - r). Jf. testrapport:
+    // Aliuminatas gir 10 % rabatt. Tilbud uten Discount-linje gir rabatt = 0.
+    let rabatt = 0;
+    const discM = rawText.match(/Discount\s+-?([\d]+(?:[.,]\d+)?)\s*%/i);
+    if (discM) rabatt = parseFloat(discM[1].replace(',', '.')) || 0;
+
+    // Faktor beregnes ETT sted, med rabatt, og brukes for alle posisjoner
+    const faktor = faktorInput || _r2((1 - rabatt / 100) / dekningsBrok() * valutakurs);
 
     // Finn alle posisjonsheadere ("Nx seq KODE" på egen linje, f.eks. "5x 1 V01")
     const products = [];
@@ -3392,7 +3567,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
         eurPerStk   = qty > 1 ? _r2(total / qty) : total;
       }
 
-      const nokPerStk = _r2(eurPerStk * (faktorInput || _r2(valutakurs / 0.70)));
+      const nokPerStk = _r2(eurPerStk * faktor);
       const sum       = _r2(nokPerStk * qty);
 
       // Specs
@@ -3431,19 +3606,19 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       throw new Error('Fant ingen produktposisjoner i Aliuminatas-tilbudet. Kontroller at PDF-en har en lesbar tekstlag (ikke skannet bilde) og prøv på nytt.');
     }
 
-    const faktor = faktorInput || _r2(valutakurs / 0.70);
     const eksMva = _r2(products.reduce((s,p) => s + p.sum, 0));
     const mva    = _r2(eksMva * 0.25);
     const tot    = _r2(eksMva + mva);
 
     return {
-      t:tilbudsNr, d:dato, r:0,
+      t:tilbudsNr, d:dato, r:rabatt,
       kunde: (typeof KUNDE_PROFIL !== 'undefined' ? KUNDE_PROFIL.navn : 'Norwin AS'),
       kontakt:'', kadr:'', mob:'', epost:'',
       prosjekt, uv:'', vekt:'',
       p:products, eksMva, mva, tot,
       _vnrMap: Object.fromEntries(products.map((p,i) => [i+1, p._posId || `ALU-${i+1}`])),
-      _fabrikk: 'aliuminatas'
+      _fabrikk: 'aliuminatas',
+      _faktor: faktor
     };
   }
 
@@ -3457,6 +3632,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     document.getElementById('form-area').style.display = 'none';
     document.getElementById('loading').style.display = 'block';
 
+    let claudeFeil = null;
     try {
       let resFinal, skisser = {}, vnrMap = {};
 
@@ -3465,6 +3641,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       // ── v2: Claude-tolkning via claude-proxy (MASTERPROMPT v3.0). Alle felt
       //    med, oversatt, delt ordliste fra admin. Lokale parsere er fallback. ──
       let claudeOk = false;
+      skjulAiVarsel();
       try {
         const pdfTextC   = await extractPdfTextLayout(selectedFile);
         const faktorInpC = parseNum(document.getElementById('faktor').value);
@@ -3476,10 +3653,14 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
           (resC2.p || []).forEach((p, i) => { p.n = numP1 + i + 1; });
           resC = { ...resC, p: [...(resC.p || []), ...(resC2.p || [])] };
         }
+        // Faktor iht. kundens dekningsinnstilling. Fabrikkrabatt (r) bakes inn for
+        // ALLE fabrikker som oppgir rabatt (jf. testrapport: Aliuminatas 10 %,
+        // HCTC 35-40 %, Vitron/VEKA 23 % osv.) — kostpris er listepris x (1 - r).
+        const rabC = (resC.r != null && isFinite(parseFloat(resC.r)))
+          ? parseFloat(resC.r)
+          : (FABRIKK === 'hctc' ? 35 : 0);
         const faktorC = faktorInpC > 0 ? faktorInpC
-          : (FABRIKK === 'hctc'
-              ? _r2((1 - ((resC.r != null ? resC.r : 35)) / 100) / 0.70 * valutakurs)
-              : _r2(valutakurs / 0.70));
+          : _r2((1 - rabC / 100) / dekningsBrok() * valutakurs);
         normaliserPriser(resC, faktorC);
         resFinal = resC;
         window._faktorTilbud = faktorC;
@@ -3493,6 +3674,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
           if (result && result.skisser) { skisser = result.skisser; vnrMap = Object.assign({}, result.vnrMap || {}); }
         } catch(e) { console.warn('Bilde-ekstraksjon feilet:', e); }
       } catch(e) {
+        claudeFeil = forklarClaudeFeil(e && e.message ? e.message : String(e));
         console.warn('Claude-tolkning utilgjengelig — bruker lokal parser:', e);
       }
 
@@ -3540,7 +3722,9 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
           resFinal = res1;
         }
 
-        window._faktorTilbud = faktorInp || _r2(valutakurs / 0.70);
+        // Aliuminatas-parseren returnerer _faktor med fabrikkrabatt innbakt;
+        // Aradas/Aldens setter ikke _faktor og beholder dermed uendret oppførsel.
+        window._faktorTilbud = faktorInp || resFinal._faktor || _r2(valutakurs / dekningsBrok());
 
       } else if (!claudeOk && FABRIKK === 'vitron') {
         // ── VITRON / ALIPLAST GENESIS-FLYT ───────────────────────────────────
@@ -3568,7 +3752,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
           resFinal = { ...res1, p: alleProdukter, eksMva: eksMva2, mva: _r2(eksMva2 * 0.25), tot: _r2(eksMva2 * 1.25) };
         }
 
-        window._faktorTilbud = faktorInp > 0 ? faktorInp : _r2(valutakurs / 0.70);
+        window._faktorTilbud = faktorInp > 0 ? faktorInp : (resFinal._faktor || _r2(valutakurs / dekningsBrok()));
 
       } else if (!claudeOk) {
         // ── NORWIN/HCTC-FLYT (fallback) ───────────────────────────────────────
@@ -3599,7 +3783,12 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
           }
         } catch(e) {}
 
-        window._faktorTilbud = _r2((1 - (resFinal.r || 35) / 100) / 0.70 * valutakurs);
+        window._faktorTilbud = _r2((1 - (resFinal.r || 35) / 100) / dekningsBrok() * valutakurs);
+      }
+
+      if (!claudeOk) {
+        visAiVarsel('⚠ AI-tolkningen var ikke tilgjengelig' + (claudeFeil ? ' — ' + claudeFeil : '') +
+          '. Tilbudet under er laget av reserve-parseren: oversettelse og spesifikasjoner kan være mindre fullstendige enn normalt — kontroller ekstra nøye før utsending.');
       }
 
       const selger = getSelger();
@@ -3645,8 +3834,33 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     } catch(err) {
       document.getElementById('loading').style.display = 'none';
       document.getElementById('form-area').style.display = 'block';
-      errEl.textContent = 'Feil: ' + err.message;
+      errEl.textContent = claudeFeil
+        ? 'AI-tolkningen var utilgjengelig — ' + claudeFeil + ' Reserve-parseren feilet også: ' + err.message
+        : 'Feil: ' + err.message;
     }
+  }
+
+  /** Oversetter tekniske claude-proxy-feil til forståelig norsk med riktig tiltak. */
+  function forklarClaudeFeil(m) {
+    const s = String(m || '');
+    if (/credit balance is too low/i.test(s))
+      return 'Anthropic-kontoen er tom for API-kreditter. Fyll på i Anthropic Console (Plans & Billing), så fungerer AI-tolkningen igjen.';
+    if (/Ikke innlogget/i.test(s))
+      return 'Du er ikke innlogget — logg inn på nytt.';
+    if (/rate.?limit|overloaded|529/i.test(s))
+      return 'AI-tjenesten er midlertidig overbelastet — prøv igjen om litt.';
+    return s;
+  }
+
+  function visAiVarsel(tekst) {
+    const el = document.getElementById('ai-varsel');
+    if (!el) return;
+    el.textContent = tekst;
+    el.style.display = 'block';
+  }
+  function skjulAiVarsel() {
+    const el = document.getElementById('ai-varsel');
+    if (el) el.style.display = 'none';
   }
 
   function byttFane(fane) {
@@ -3656,7 +3870,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     document.getElementById('tab-btn-hurtig').classList.toggle('active', fane === 'hurtig');
   }
 
-  /** Oppdaterer fabrikk-hintboksen med beregnet faktor for 30% dekning. */
+  /** Oppdaterer fabrikk-hintboksen med beregnet faktor for kundens dekningsinnstilling. */
   function oppdaterFabrikkHint() {
     const hintBox    = document.getElementById('fabrikk-hint-aradas');
     const hintFaktor = document.getElementById('hint-faktor');
@@ -3668,8 +3882,10 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     const navnMap = { aradas:'Aradas', aldens:'Aldens', aliuminatas:'Aliuminatas' };
     if (hintNavn) hintNavn.textContent = (navnMap[FABRIKK] || FABRIKK) + ':';
     const kurs = parseNum(document.getElementById('valutakurs').value) || FALLBACK_RATE;
-    const f30  = (kurs / 0.70).toFixed(2).replace('.', ',');
+    const f30  = (kurs / dekningsBrok()).toFixed(2).replace('.', ',');
     if (hintFaktor) hintFaktor.textContent = f30;
+    const hintDekning = document.getElementById('hint-dekning');
+    if (hintDekning) hintDekning.textContent = String(DEKNING_PROSENT).replace('.', ',');
   }
   // Bakoverkompatibel alias
   function oppdaterAradasHint() { oppdaterFabrikkHint(); }
@@ -4001,6 +4217,35 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     const selger = document.getElementById('selger').value.trim() || 'Ukjent';
     const dato = new Date().toLocaleString('nb-NO');
     endringslogg.push({ dato, selger, produktNr, felt, fra, til });
+    lagreEndringIDB(produktNr, felt, fra, til); // asynkront, fire-and-forget
+  }
+
+  /** Skriver hver enkelt endring til endringslogg-tabellen i Supabase, slik at
+   *  vi kan lære av brukeradferd (hvilke ord/setninger og priser som justeres).
+   *  Feiler stille — databaselogging skal aldri blokkere selgerens arbeid. */
+  async function lagreEndringIDB(produktNr, felt, fra, til) {
+    try {
+      const gml = String(fra == null ? '' : fra).trim();
+      const ny  = String(til == null ? '' : til).trim();
+      if (gml === ny) return;
+      const token = await noraGyldigToken();
+      if (!token) return;
+      const rad = {
+        selger_epost: (NORA_SESJON && NORA_SESJON.epost) || '',
+        tilbudsnr:    window._tilbudsNr || null,
+        posisjonsnr:  (parseInt(String(produktNr).replace(/\D+/g, ''), 10) || null),
+        felt_endret:  String(felt || 'ukjent'),
+        gammel_verdi: gml,
+        ny_verdi:     ny,
+        kunde_id:     KUNDE_ID
+      };
+      await fetch(SB_URL + '/rest/v1/endringslogg', {
+        method: 'POST',
+        headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token,
+                   'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify(rad)
+      });
+    } catch(e) { console.warn('endringslogg til database feilet:', e); }
   }
 
   // ── Admin-logg: lagrer alle tekstendringer på tvers av tilbud i localStorage ──
