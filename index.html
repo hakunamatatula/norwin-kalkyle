@@ -1243,7 +1243,7 @@ ${klon.outerHTML}
   // Versjonsstyrt cache-rydding: rydder gammel rate-cache når app-versjon endres.
   // Forhindrer at nettleseren viser gammel fallback-kurs (11.20) etter kodeoppdatering.
   // Viktig: oppdater APP_VERSION ved hver ny deployment (f.eks. '2026-05-21-v1').
-  const APP_VERSION = '2026-07-10-v48';
+  const APP_VERSION = '2026-07-10-v49';
   try {
     if (localStorage.getItem('merkapital_app_version') !== APP_VERSION) {
       localStorage.removeItem(RATE_CACHE_KEY);
@@ -2892,9 +2892,45 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       const tc   = await page.getTextContent();
 
       // Finn produkter på denne siden (posId + y-posisjon i PDF-pts)
-      const allTcItems = tc.items.map(it => ({ str: it.str.trim(), y: it.transform[5], x: it.transform[4] }));
+      const allTcItems = tc.items.map(it => ({ str: it.str.trim(), y: it.transform[5], x: it.transform[4], w: it.width || 0 }));
       const prodItems = allTcItems
         .filter(it => PROD_RE.test(it.str) && it.x < 60);
+
+      // v49-fiks: Aradas-format ("V1 900 x 2150 mm.", "LD2 2100 x 3245 mm." —
+      // samme posisjonskoder som parseAradasPDF allerede gjenkjenner) fikk ALDRI
+      // skisser: PROD_RE over krever at tallet står i SAMME PDF-tekstelement som
+      // koden ("V1<mellomrom>900"), men Aradas lagrer koden ("V1") som et HELT
+      // EGET element atskilt fra målene — bekreftet 0 skisser i alle 3 ekte
+      // Aradas-testfiler. Fiks: bygg linjer med riktig mellomrom (samme
+      // gap-metode som extractPdfTextLayout) og match kode+mål-mønsteret (samme
+      // konvensjon som parseAradasPDF sin PROD_RE) mot HELE linjen i stedet for
+      // enkeltelementer.
+      const ARADAS_LINE_RE = /^([A-Z]{1,3}\d+[a-z]?)\s+\d[\d\s,.]*?\s*[xX×]\s*\d[\d\s,.]*?\s*mm\.?/i;
+      {
+        const sorted = [...allTcItems].filter(it => it.str).sort((a, b) => b.y - a.y);
+        const lineGroups = [];
+        for (const it of sorted) {
+          const last = lineGroups[lineGroups.length - 1];
+          if (last && Math.abs(it.y - last.y0) < 8) last.items.push(it);
+          else lineGroups.push({ y0: it.y, items: [it] });
+        }
+        for (const g of lineGroups) {
+          g.items.sort((a, b) => a.x - b.x);
+          let text = '', prevRight = null;
+          for (const it of g.items) {
+            if (prevRight !== null && (it.x - prevRight) > 1) text += ' ';
+            text += it.str; prevRight = it.x + it.w;
+          }
+          text = text.trim();
+          const m = text.match(ARADAS_LINE_RE);
+          if (m) {
+            const codeItem = g.items.find(it => it.str === m[1]) || g.items[0];
+            if (codeItem.x < 60 && !prodItems.some(p => Math.abs(p.y - g.y0) < 1.5)) {
+              prodItems.push({ str: text, y: g.y0, x: codeItem.x });
+            }
+          }
+        }
+      }
 
       // Aliuminatas-format: "Nx  seq  KODE" splittet over flere tekstelementer på samme y-linje
       // (f.eks. "5x" ved x=70.8, "1" ved x=91, "V01" ved x=211 - alle med identisk y).
@@ -3166,24 +3202,30 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
    * Fallback for Aldens: klipp ett horisontalt bånd av siden.
    * idx = produkt-indeks på siden (0-basert), total = antall produkter på siden.
    */
-  function _aldensBandCrop(canvas, vp, idx, total) {
-    const bandH = Math.floor(vp.height / total);
-    const startY = Math.floor(bandH * idx);
+  // v49-fiks: Gamle _aldensBandCrop delte siden i N LIKE STORE horisontale bånd
+  // uavhengig av hvor posisjonene faktisk står — fungerte kun tilfeldig når
+  // posisjonene var jevnt fordelt over siden. Så snart extractAldensSketches
+  // fikk fanget posisjoner med andre kodeformater enn "ALU-N" (se fiksen i
+  // extractAldensSketches over), viste denne seg å gi HELT feil bilde: side 1 i
+  // "07.05.2026_Q_Atlant..." har kun 2 posisjoner, og den jevne 50/50-delingen
+  // traff øverste bånd midt i brevhodet (ALDENS-logo + prosjektbeskrivelse) i
+  // stedet for posisjon 1s tegning, og posisjon 2 fikk halve posisjon 1s
+  // tegning + halve sin egen. Fiks: bruk de faktiske "Pos. N"-tekstankrenes
+  // y-koordinater — sonen for hver posisjon avgrenses av midtpunktet mot
+  // nabo-ankrene (fast margin for første/siste posisjon på siden).
+  function _aldensZoneCrop(canvas, vp, vp1, scale, prodYCoords, pi) {
+    const y     = prodYCoords[pi];
+    const topY  = pi === 0
+      ? Math.min(vp1.height, y + 120)   // fanger "N / Price: / Construction:"-mini-header uten hele brevhodet
+      : (prodYCoords[pi - 1] + y) / 2;
+    const botY  = (pi + 1 < prodYCoords.length)
+      ? (y + prodYCoords[pi + 1]) / 2
+      : Math.max(20, y - 260);          // siste posisjon på siden: fast fallback-høyde
     const cX = Math.floor(canvas.width * 0.04);
-    const cY = Math.max(0, startY + Math.floor(bandH * 0.04));
+    const cY = Math.max(0, Math.floor(vp.height - topY * scale));
     const cW = Math.floor(canvas.width * 0.58);
-    const cH = Math.min(Math.floor(bandH * 0.90), canvas.height - cY);
-    const maxSide = 500;
-    const aspect  = cW / Math.max(cH, 1);
-    const nW = aspect >= 1 ? maxSide : Math.round(maxSide * aspect);
-    const nH = aspect >= 1 ? Math.round(maxSide / aspect) : maxSide;
-    const nc = document.createElement('canvas');
-    nc.width = nW; nc.height = nH;
-    const nCtx = nc.getContext('2d');
-    nCtx.fillStyle = '#ffffff';
-    nCtx.fillRect(0, 0, nW, nH);
-    nCtx.drawImage(canvas, cX, cY, cW, cH, 0, 0, nW, nH);
-    return nc.toDataURL('image/png').split(',')[1];
+    const cH = Math.max(20, Math.min(Math.floor((topY - botY) * scale), canvas.height - cY));
+    return _cropCanvasRegion(canvas, cX, cY, cW, cH);
   }
 
   /** Klipp ett enkelt bilde fra canvas og normaliser til maks 500px */
@@ -3225,34 +3267,67 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       const page = await pdf.getPage(pn);
       const tc   = await page.getTextContent();
 
-      // ── Kollapser letter-spacet tekst: grupper items per Y-linje ──
-      // Bruker 8pt toleranse (som extractPdfTextLayout) slik at "Pos." og "ALU-N"
-      // på samme linje alltid havner i samme gruppe uavhengig av PDF-versjon.
-      const lineMap = new Map(); // roundedY → samlet tekst
-      for (const item of tc.items) {
-        const ry = Math.round(item.transform[5] / 8) * 8;
-        lineMap.set(ry, (lineMap.get(ry) || '') + item.str);
+      // v49-fiks: Den gamle koden lette KUN etter "ALU-N"-koder ("ALU\s*-\s*\d+"),
+      // men ekte Aldens-tilbud bruker like ofte andre kodeformater — YD-01, V1,
+      // V-1, V6.A, IV-01, YD-4_V osv (samme innsikt som i parseAldensPDF, som
+      // allerede fanger "det første ordet uansett format" etter "Pos."). Fordi
+      // ALU-regexen aldri traff på disse, ble numProds=0 og HELE siden hoppet
+      // over (ingen skisser i det hele tatt) — bekreftet i regresjon: 3 av 5 ekte
+      // Aldens-tilbud (Atlant-Valeveien, EcoSor-Romedal, Jegard-EdvMunch) fikk
+      // 0 skisser, kun de 2 filene som tilfeldigvis bruker ALU-prefiks fungerte.
+      // Fiks: bygg linjer med riktig mellomrom (samme gap-metode som
+      // extractPdfTextLayout, som prisparseren allerede bruker med suksess) og
+      // tell posisjoner via samme "Pos. <kode>"-konvensjon som parseAldensPDF,
+      // i stedet for et hardkodet ALU-mønster.
+      const itemsSide = tc.items.filter(it => it.str && it.str.trim())
+        .map(it => ({ str: it.str.trim(), x: it.transform[4], y: it.transform[5], w: it.width || 0 }));
+      itemsSide.sort((a, b) => b.y - a.y);
+      const lineGroups = [];
+      for (const it of itemsSide) {
+        const last = lineGroups[lineGroups.length - 1];
+        if (last && Math.abs(it.y - last.y0) < 8) last.items.push(it);
+        else lineGroups.push({ y0: it.y, items: [it] });
       }
-      const allCollapsed = Array.from(lineMap.values()).join('\n');
+      const sideLines = lineGroups.map(g => {
+        g.items.sort((a, b) => a.x - b.x);
+        let text = '', prevRight = null;
+        for (const it of g.items) {
+          if (prevRight !== null && (it.x - prevRight) > 1) text += ' ';
+          text += it.str; prevRight = it.x + it.w;
+        }
+        return { y: g.y0, text: text.trim() };
+      }).filter(l => l.text);
 
-      // Finn ALU-posisjoner på siden (kan være 0, 1 eller 2+).
-      // Regex bruker ALU\s*-\s*\d+ for å håndtere varianter med og uten mellomrom:
-      //   "Pos.ALU-1MB-78EI..." (letter-spacet, sammenslått uten mellomrom)
-      //   "Pos. ALU-1 MB-78EI..." (normalformat med mellomrom)
-      //   "Pos. ALU - 1 MB - 78EI..." (mellomrom rundt bindestrek)
-      const aluMatches = allCollapsed.match(/ALU\s*-\s*\d+/gi) || [];
-      if (aluMatches.length === 0) continue;
+      // Gyldighetssjekk — samme regel som parseAldensPDF: en ekte posisjon har
+      // ALLTID mål "(B=..,H=..)" og/eller en "Pcs.:"-linje i nærheten. Uten denne
+      // sjekken teller vi også med løse fritekst-merknader som tilfeldigvis
+      // starter med "Pos. <ord>" (sett i "Jegard-EdvMunch 66": to kommentarlinjer
+      // helt til slutt i dokumentet, "Pos. V5 i tilfelle av..." og "Pos. V11- ikke
+      // klart...", ble tidligere talt som posisjon 18 og 19 og fikk tomme/feil
+      // bilder — riktig antall ekte posisjoner er 17, som prisparseren allerede
+      // regner riktig).
+      const posLines = sideLines.filter((l, i) => {
+        if (!/^Pos\.\s*[^\s:]/i.test(l.text)) return false;
+        const dimWindow = sideLines.slice(i, i + 6).map(x => x.text).join(' ');
+        if (/\(\s*B\s*=\s*[\d\s]+,\s*H\s*=\s*[\d\s]+\)/.test(dimWindow)) return true;
+        for (let j = i + 1; j < Math.min(i + 18, sideLines.length); j++) {
+          const l2 = sideLines[j].text;
+          if (/^Pcs\s*\.?\s*:/i.test(l2)) return true;
+          if (/^(Total\s*without|Pos\.)/i.test(l2)) break;
+        }
+        return false;
+      });
+      if (posLines.length === 0) continue;
 
-      const numProds = aluMatches.length;
+      const numProds = posLines.length;
 
-      // Finn Y-koordinater (pdf.js user space: Y fra bunn) for hvert ALU-treff
-      // Sortert synkende (høyest på siden = størst Y = øverst)
-      const prodYCoords = [];
-      for (const [ry, line] of [...lineMap.entries()].sort((a, b) => b[0] - a[0])) {
-        if (/ALU\s*-\s*\d+/i.test(line)) prodYCoords.push(ry);
-      }
+      // Y-koordinater (pdf.js user space: Y fra bunn) for hvert posisjonsanker,
+      // sortert synkende (høyest på siden = størst Y = øverst) — sideLines er
+      // allerede bygget topp-til-bunn siden itemsSide er sortert synkende på y.
+      const prodYCoords = posLines.map(l => l.y);
 
       // Render siden
+      const vp1    = page.getViewport({ scale: 1.0 });
       const vp     = page.getViewport({ scale });
       const canvas = document.createElement('canvas');
       canvas.width = vp.width; canvas.height = vp.height;
@@ -3301,10 +3376,10 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
             drawing.w * scale,
             drawing.h * scale
           );
-          skisser[curSeqNr] = b64 || _aldensBandCrop(canvas, vp, pi, numProds);
+          skisser[curSeqNr] = b64 || _aldensZoneCrop(canvas, vp, vp1, scale, prodYCoords, pi);
         } else {
-          // Ingen raster-bilde — tegningen er vektor; klipp bånd for dette produktet
-          skisser[curSeqNr] = _aldensBandCrop(canvas, vp, pi, numProds);
+          // Ingen raster-bilde — tegningen er vektor; klipp sonen rundt dette produktets "Pos."-anker
+          skisser[curSeqNr] = _aldensZoneCrop(canvas, vp, vp1, scale, prodYCoords, pi);
         }
       }
 
@@ -3370,10 +3445,34 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
       canvas.width = vp.width; canvas.height = vp.height;
       await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
 
+      // v49: Tabellkolonne-hodet ("O.n./L.p." ... "Quantity"/"Ilość" ... "Net unit
+      // price"/"Cena jedn." ... "Net worth"/"Wartość netto" ... "Uwagi"/"Comments",
+      // pluss enhets-underraden "dimensions, descriptions (EUR)(EUR)"/"sztuk netto")
+      // gjentas øverst i tabellen på HVER side (både side 1 med fullt brevhode og
+      // fortsettelsessider). Brukes til å avgrense toppen av beskjæringen når det
+      // ikke finnes et forrige "Pos. N"-anker på siden (se under).
+      const HEADER_TOKEN_RE = /Ilość|Wartość|netto|sztuk|Cena jedn|Rysunek|Wymiary|Opis|Uwagi|Quantity|Net unit price|Net worth|Comments|dimensions|descriptions|\(EUR|O\.n\.|L\.p\./i;
+
       for (let pi = 0; pi < posAnchors.length; pi++) {
         const anchor = posAnchors[pi];
         const prev   = posAnchors[pi - 1];
-        const topY   = prev ? prev.y : vp1.height;   // toppen av tegningsomradet (PDF-y)
+        // v49-fiks: FØRSTE posisjon på en side manglet et "prev"-anker, så toppen
+        // av beskjæringen falt tilbake til HELE sidehøyden — det trakk med hele
+        // brevhodet (VITRON-logo, kunde-/kontaktinfo, "Woodwork description",
+        // "Statics" osv.) inn i "tegningen". Sett i "NorWin ref Q Prinsens gt. 4":
+        // bildet viste brevhode+adresse i stedet for dørtegningen. Fiks: finn
+        // tabellens kolonnehode-tokens over ankeret på DENNE siden og bruk den
+        // laveste (nærmest tegningen) som ny topp. Faller tilbake til gammel
+        // oppførsel (hele sidehøyden) hvis ingen slike tokens finnes.
+        let topY;
+        if (prev) {
+          topY = prev.y;
+        } else {
+          const headerYs = items
+            .filter(it => it.y > anchor.y && HEADER_TOKEN_RE.test(it.str))
+            .map(it => it.y);
+          topY = headerYs.length ? Math.min(...headerYs) : vp1.height;
+        }
         const botY   = anchor.y - 26;                // bunn: under "Pos. N (B=,H=)"-blokken (2 linjer)
 
         // Høyre grense: mal faktisk tekstinnhold i tegningsomradet (dimensjonstall,
