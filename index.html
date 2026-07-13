@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="2026-07-04-v42"/>
+<meta name="app-version" content="2026-07-13-v50"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
@@ -979,9 +979,13 @@ ${klon.outerHTML}
     if (tekst) tekst.textContent = 'Detekterer…';
     if (badge) { badge.style.borderColor = 'var(--border)'; badge.style.color = 'var(--muted)'; }
 
-    sniffPdfText(f).then(txt => {
+    // Les og hurtigbufre filens bytes UMIDDELBART (mens filen garantert er lesbar)
+    filBytes(f).then(() => sniffPdfText(f)).then(txt => {
       const id = detekterFabrikk(txt);
       settFabrikk(id);
+    }).catch(err => {
+      if (tekst) tekst.textContent = err.message;
+      if (icon)  icon.textContent  = '\u26a0\ufe0f';
     });
   }
 
@@ -990,14 +994,37 @@ ${klon.outerHTML}
     dropzone2.classList.add('has-file');
     document.getElementById('drop-icon2').textContent = '✓';
     document.getElementById('drop-text2').textContent = f.name;
+    filBytes(f).catch(err => { document.getElementById('drop-text2').textContent = err.message; });
+  }
+
+  /**
+   * Les filens bytes EN gang og hurtigbufre dem. Alle senere lesinger bruker kopien.
+   * Grunn: OneDrive/skylagring kan gjore filen uleselig mellom valg og tolkning
+   * (NotReadableError: "could not be read ... permission problems"). Ved a lese
+   * i det oyeblikket filen velges, unngas dette helt.
+   * NB: pdf.js "forbruker" (detacher) ArrayBuffer-en den far - bruk alltid .slice(0)-kopi.
+   */
+  const _filBytesCache = new WeakMap();
+  async function filBytes(file) {
+    if (_filBytesCache.has(file)) return _filBytesCache.get(file);
+    try {
+      const ab = await file.arrayBuffer();
+      _filBytesCache.set(file, ab);
+      return ab;
+    } catch (e) {
+      throw new Error('Fikk ikke lest filen \u00ab' + file.name + '\u00bb (' + (e && e.message ? e.message : e) + '). ' +
+        'Dette skjer oftest nar filen ligger i OneDrive/skylagring og ikke er lastet ned lokalt, ' +
+        'eller ble endret etter at den ble valgt. Kopier filen til en lokal mappe (f.eks. Nedlastinger) og velg den pa nytt.');
+    }
   }
 
   function fileToBase64(file) {
-    return new Promise((res, rej) => {
-      const r = new FileReader();
-      r.onload = () => res(r.result.split(',')[1]);
-      r.onerror = rej;
-      r.readAsDataURL(file);
+    return filBytes(file).then(ab => {
+      const b = new Uint8Array(ab);
+      let s = '';
+      const BIT = 0x8000;
+      for (let i = 0; i < b.length; i += BIT) s += String.fromCharCode.apply(null, b.subarray(i, i + BIT));
+      return btoa(s);
     });
   }
 
@@ -1177,7 +1204,7 @@ ${klon.outerHTML}
   /** Les tekst fra side 1–2 i PDF-en (rask sniff for auto-deteksjon). */
   async function sniffPdfText(file) {
     try {
-      const ab  = await file.arrayBuffer();
+      const ab  = (await filBytes(file)).slice(0);
       const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
       let txt = '';
       const pages = Math.min(pdf.numPages, 2);
@@ -1243,7 +1270,7 @@ ${klon.outerHTML}
   // Versjonsstyrt cache-rydding: rydder gammel rate-cache når app-versjon endres.
   // Forhindrer at nettleseren viser gammel fallback-kurs (11.20) etter kodeoppdatering.
   // Viktig: oppdater APP_VERSION ved hver ny deployment (f.eks. '2026-05-21-v1').
-  const APP_VERSION = '2026-07-10-v49';
+  const APP_VERSION = '2026-07-13-v50';
   try {
     if (localStorage.getItem('merkapital_app_version') !== APP_VERSION) {
       localStorage.removeItem(RATE_CACHE_KEY);
@@ -1486,7 +1513,7 @@ ${klon.outerHTML}
     const pdfjsLib = window.pdfjsLib;
     if (!pdfjsLib) throw new Error('PDF-biblioteket (pdf.js) er ikke lastet. Sjekk internettilkoblingen og refresh siden.');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://hakunamatatula.github.io/tilbudskalkulator/pdf.worker.min.js';
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer = (await filBytes(file)).slice(0);
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     let fullText = '';
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -1509,7 +1536,7 @@ ${klon.outerHTML}
     const pdfjsLib = window.pdfjsLib;
     if (!pdfjsLib) throw new Error('PDF-biblioteket (pdf.js) er ikke lastet. Sjekk internettilkoblingen og refresh siden.');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://hakunamatatula.github.io/tilbudskalkulator/pdf.worker.min.js';
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer = (await filBytes(file)).slice(0);
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
     // Steg 1: Scan alle sider og finn ankerpunkter for hvert produkt
@@ -1933,7 +1960,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     const pdfjsLib = window.pdfjsLib;
     if (!pdfjsLib) throw new Error('PDF-biblioteket (pdf.js) er ikke lastet. Sjekk internettilkoblingen og refresh siden.');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://hakunamatatula.github.io/tilbudskalkulator/pdf.worker.min.js';
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer = (await filBytes(file)).slice(0);
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     const allLines = [];
     for (let pn = 1; pn <= pdf.numPages; pn++) {
@@ -2877,7 +2904,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     const pdfjsLib = window.pdfjsLib;
     if (!pdfjsLib) throw new Error('PDF-biblioteket ikke lastet.');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://hakunamatatula.github.io/tilbudskalkulator/pdf.worker.min.js';
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer = (await filBytes(file)).slice(0);
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
     const skisser = {};   // {posNr: base64}
@@ -3250,7 +3277,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
   async function extractAldensSketches(file) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://hakunamatatula.github.io/tilbudskalkulator/pdf.worker.min.js';
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer = (await filBytes(file)).slice(0);
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
     const skisser = {};  // { produktNr: base64 }
@@ -3400,7 +3427,7 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
     const pdfjsLib = window.pdfjsLib;
     if (!pdfjsLib) throw new Error('PDF-biblioteket ikke lastet.');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://hakunamatatula.github.io/tilbudskalkulator/pdf.worker.min.js';
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer = (await filBytes(file)).slice(0);
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
     const skisser = {};
