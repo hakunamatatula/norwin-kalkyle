@@ -159,8 +159,13 @@
           <div><label>Maks dekning %</label><input id="inst-maks" type="number" step="0.1"></div>
           <div><label>Standard faktorpåslag (valgfri)</label><input id="inst-faktor" type="number" step="0.0001" placeholder="beregnes av kurs/dekning hvis tom"></div>
         </div>
+        <div style="margin-top:12px">
+          <label>Leveringssted i vilkårene (valgfri)</label>
+          <input id="inst-levering" type="text" placeholder="f.eks. Gullerød Gård, Hortensveien 273" style="width:100%">
+        </div>
         <div style="margin-top:14px"><button class="btn" onclick="lagreInnstillinger()">Lagre innstillinger</button></div>
-        <p class="hjelpetekst">Gjelder alle selgere hos kunden ved nye tilbud. Selger kan justere per posisjon innenfor min/maks.</p>
+        <p class="hjelpetekst">Gjelder alle selgere hos kunden ved nye tilbud. Selger kan justere per posisjon innenfor min/maks.<br>
+        Leveringsstedet vises i vilkårspunkt 1 i kundetilbudet. Står feltet tomt, skrives «Varene utleveres til avtalt leveringsadresse».</p>
       </div>
     </section>
     <section id="fane-ordliste" hidden>
@@ -557,10 +562,12 @@ async function visInnstillinger(){
   if(!i) return meld('app-melding','Fant ingen innstillinger for valgt kunde','feil');
   $('inst-dekning').value=i.dekning_prosent; $('inst-min').value=i.dekning_min;
   $('inst-maks').value=i.dekning_maks; $('inst-faktor').value=i.standard_faktor??'';
+  $('inst-levering').value=i.leveringsadresse??'';
 }
 async function lagreInnstillinger(){
   const b = {dekning_prosent:+$('inst-dekning').value, dekning_min:+$('inst-min').value,
              dekning_maks:+$('inst-maks').value, standard_faktor: $('inst-faktor').value===''?null:+$('inst-faktor').value,
+             leveringsadresse: $('inst-levering').value.trim()||null,
              oppdatert_av: minProfil.id, oppdatert: new Date().toISOString()};
   if(b.dekning_min>b.dekning_prosent||b.dekning_prosent>b.dekning_maks) return meld('app-melding','Krav: min ≤ standard ≤ maks','feil');
   try{

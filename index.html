@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="app-version" content="2026-08-13-v51"/>
+<meta name="app-version" content="2026-08-13-v52"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
@@ -750,9 +750,10 @@
       // Dekning/faktor iht. kundens innstillinger (adminpanelet) — RLS gir kun egen kunde
       try {
         const innFilter = kid ? 'kunde_id=eq.' + kid + '&' : '';
-        const ir = await fetch(SB_URL + '/rest/v1/innstillinger?' + innFilter + 'select=dekning_prosent,standard_faktor&limit=1', { headers: hdr });
+        const ir = await fetch(SB_URL + '/rest/v1/innstillinger?' + innFilter + 'select=dekning_prosent,standard_faktor,leveringsadresse&limit=1', { headers: hdr });
         const inn = (await ir.json())[0];
         if (inn) {
+          LEVERINGSADRESSE = (inn.leveringsadresse || '').trim();
           if (inn.dekning_prosent != null) DEKNING_PROSENT = parseFloat(inn.dekning_prosent) || 30;
           STANDARD_FAKTOR = (inn.standard_faktor != null && parseFloat(inn.standard_faktor) > 0) ? parseFloat(inn.standard_faktor) : null;
           const fEl = document.getElementById('faktor');
@@ -1266,6 +1267,10 @@ ${klon.outerHTML}
   // ── KUNDEPROFIL ─────────────────────────────────────────────────────────────
   // Tilpass disse verdiene per kunde/deployment (én versjon per bedrift).
   // Skjuler konfigurasjonen mellom kunder — kun aktuelle fabrikker og selgere vises.
+  // Leveringssted i vilkårspunkt 1. Settes per kunde i adminpanelet
+  // (innstillinger.leveringsadresse). Tom = nøytral formulering.
+  let LEVERINGSADRESSE = '';
+
   const KUNDE_PROFIL = {
     navn:      '',                                                // Settes fra databasen ved innlogging
     fabrikker: ['hctc', 'vitron', 'aradas', 'aldens', 'aliuminatas'], // Fabrikker denne kunden bruker
@@ -1274,7 +1279,7 @@ ${klon.outerHTML}
   // Versjonsstyrt cache-rydding: rydder gammel rate-cache når app-versjon endres.
   // Forhindrer at nettleseren viser gammel fallback-kurs (11.20) etter kodeoppdatering.
   // Viktig: oppdater APP_VERSION ved hver ny deployment (f.eks. '2026-05-21-v1').
-  const APP_VERSION = '2026-08-13-v51';
+  const APP_VERSION = '2026-08-13-v52';
   try {
     if (localStorage.getItem('merkapital_app_version') !== APP_VERSION) {
       localStorage.removeItem(RATE_CACHE_KEY);
@@ -5267,12 +5272,15 @@ Svar KUN med kompakt JSON (ingen mellomrom/linjeskift i strenger):
 
   function renderOffer(res, info) {
     // Vilkårene var tidligere hardkodet med ÉN kundes firmanavn og leveringsadresse,
-    // som dermed lekket inn i alle andre kunders tilbud. Firmanavnet hentes nå fra
-    // innlogget kunde. Leveringsstedet er kundespesifikt og hører hjemme i
-    // adminpanelets innstillinger — inntil det finnes der, brukes en nøytral formulering.
+    // som dermed lekket inn i alle andre kunders tilbud. Begge hentes nå fra
+    // innlogget kunde: firmanavn fra kunder.navn, leveringssted fra
+    // innstillinger.leveringsadresse (settes i adminpanelet, tomt gir nøytral tekst).
     const selgerFirma = (KUNDE_PROFIL && KUNDE_PROFIL.navn) ? KUNDE_PROFIL.navn : 'Selger';
+    const levering = LEVERINGSADRESSE
+      ? 'Varene utleveres på ' + LEVERINGSADRESSE + ', hvis ikke annet er avtalt.'
+      : 'Varene utleveres til avtalt leveringsadresse, hvis ikke annet er avtalt.';
     const VILKAR = [
-      'Varene utleveres til avtalt leveringsadresse, hvis ikke annet er avtalt.',
+      levering,
       'Tilbudet forutsetter innbetaling av 25% ved bestilling og er gyldig i 14 dager.',
       'Akseptert tilbud av kunde betyr at kunden har kontrollert, forstått og akseptert tilbudet.',
       selgerFirma + ' har salgspant i varene inntil fullstendig oppgjør er mottatt.',
